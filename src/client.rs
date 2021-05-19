@@ -1,0 +1,27 @@
+use crate::player::*;
+
+pub struct Client {
+    pub id: usize,
+    pub game_room_id: usize,
+    pub room_player: Option<RoomPlayer>,
+    pub player: Option<Player>,
+}
+
+impl Client {
+    pub fn new(id: usize) -> Self {
+        Self {
+            id,
+            game_room_id: 0,
+            room_player: None,
+            player: None,
+        }
+    }
+
+    pub fn set_game_room(&mut self, id: usize) {
+        self.game_room_id = id;
+    }
+
+    pub fn set_player(&mut self, player: Player) {
+        self.player = Some(player);
+    }
+}
