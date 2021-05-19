@@ -1,43 +1,6 @@
-03:04:02 [INFO] Starting Stratepig Server...
-03:04:02 [INFO] [Config]
-03:04:02 [INFO] Default: true
-03:04:02 [INFO] | ONE_PLAYER: false
-03:04:02 [INFO] | SWIFT_GAME_ENTER: false
-03:04:02 [INFO] | IGNORE_TURNS: false
-03:04:07 [INFO] Pruned 1 room(s)
-03:04:12 [INFO] Pruned 1 room(s)
-03:04:17 [INFO] Pruned 1 room(s)
-03:04:22 [INFO] Pruned 0 room(s)
-03:04:27 [INFO] Pruned 0 room(s)
-03:04:32 [INFO] Pruned 1 room(s)
-03:04:37 [INFO] Pruned 2 room(s)
-03:04:42 [INFO] Pruned 1 room(s)
-03:04:47 [INFO] Pruned 3 room(s)
-03:04:52 [INFO] Pruned 1 room(s)
-03:04:57 [INFO] Pruned 1 room(s)
-03:05:02 [INFO] Pruned 4 room(s)
-03:05:07 [INFO] Pruned 3 room(s)
-03:05:12 [INFO] Pruned 0 room(s)
-03:05:17 [INFO] Pruned 1 room(s)
-03:05:22 [INFO] Pruned 0 room(s)
-03:05:27 [INFO] Pruned 1 room(s)
-03:05:32 [INFO] Pruned 0 room(s)
-03:05:37 [INFO] Pruned 1 room(s)
-03:05:42 [INFO] Pruned 0 room(s)
-03:05:47 [INFO] Pruned 1 room(s)
-03:05:52 [INFO] Pruned 1 room(s)
-03:05:57 [INFO] Pruned 1 room(s)
-03:06:02 [INFO] Pruned 2 room(s)
-03:06:07 [INFO] Pruned 4 room(s)
-03:06:12 [INFO] Pruned 2 room(s)
-03:06:17 [INFO] Pruned 2 room(s)
-03:06:22 [INFO] Pruned 3 room(s)
-03:06:27 [INFO] Pruned 4 room(s)
-03:06:32 [INFO] Pruned 2 room(s)
-03:06:37 [INFO] Pruned 4 room(s)
-03:06:42 [INFO] Pruned 1 room(s)
-03:06:47 [INFO] Pruned 0 room(s)
-03:06:52 [INFO] Pruned 0 room(s)
-03:06:57 [INFO] Pruned 3 room(s)
-03:07:02 [INFO] Pruned 1 room(s)
-03:07:07 [INFO] Pruned 0 room(s)
+21:30:38 [INFO] Starting Stratepig Server...
+21:30:38 [INFO] [Config]
+21:30:38 [INFO] Default: false
+21:30:38 [INFO] | ONE_PLAYER: true
+21:30:38 [INFO] | SWIFT_GAME_ENTER: false
+21:30:38 [INFO] | IGNORE_TURNS: false
