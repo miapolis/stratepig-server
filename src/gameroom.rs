@@ -310,6 +310,30 @@ pub fn get_pig_config_for_mode(mode: GameMode) -> Option<HashMap<Pig, u8>> {
     }
 }
 
+pub fn get_settings_vars(mode: GameMode) -> SettingsVars {
+    if mode == GameMode::Original || mode == GameMode::Infiltrator {
+        return SettingsVars {
+            buffer_time: 180,
+            ..Default::default()
+        };
+    }
+    return Default::default();
+}
+
+pub struct SettingsVars {
+    pub turn_time: u32,
+    pub buffer_time: u32,
+}
+
+impl std::default::Default for SettingsVars {
+    fn default() -> Self {
+        Self {
+            turn_time: 15,
+            buffer_time: 300,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum GameRoomError {
     NotFound,

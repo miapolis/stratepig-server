@@ -92,7 +92,7 @@ impl GameServer {
         self.message_room(room, packet).await;
     }
 
-    pub async fn update_config_bulk(&self, room: &GameRoom, config: HashMap<u8, u8>) {
+    pub async fn update_config_bulk(&self, room: &GameRoom, config: HashMap<board::Pig, u8>) {
         let read = room.inner();
 
         let mut packet = Packet::new_id(ServerMessage::PigConfigValueChanged as i32);

@@ -301,7 +301,7 @@ impl GameServer {
                     // Inform each client that they were kicked
                     let room = game_rooms.remove(room_id).unwrap();
                     free_game_room_ids.lock().push_back(room_id);
-                    
+
                     let server = server.lock();
 
                     for id in room.inner().client_ids.iter() {

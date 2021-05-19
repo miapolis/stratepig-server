@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use stratepig_core::Packet;
 
 use crate::constants;
@@ -166,7 +165,7 @@ impl GameServer {
             }
         } else {
             reference.cancel_start();
-            
+
             let mut packet = Packet::new_id(crate::ServerMessage::RoomTimerUpdate as i32);
             packet.write_i64(-1);
             self.message_room(&reference, packet).await;
@@ -241,10 +240,14 @@ impl GameServer {
                     .await;
 
                 if current_type != GameMode::Custom {
-                    let mut config = HashMap::new();
-                    for (pig, amount) in gameroom::get_pig_config_for_mode(current_type).unwrap() {
-                        config.insert(pig as u8, amount);
-                    }
+                    let config = gameroom::get_pig_config_for_mode(current_type).unwrap();
+                    let settings_vars = gameroom::get_settings_vars(current_type);
+
+                    let mut write = reference.get().write().unwrap();
+                    write.settings.turn_time = settings_vars.turn_time;
+                    write.settings.buffer_time = settings_vars.buffer_time;
+                    write.settings.pig_config = config.clone();
+                    drop(write);
 
                     self.update_config_bulk(&reference, config).await;
                 }
