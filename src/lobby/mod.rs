@@ -69,9 +69,9 @@ impl GameServer {
 
             let reference = self.get_room(room_id).unwrap();
 
-            self.initialize_player(id, 0).await;
+            self.initialize_player(id, PlayerRole::One).await;
             self.room_player_add(&reference).await;
-            self.send_game_info(id, &reference).await;
+            self.send_game_info(&reference, id).await;
         } else {
             let code = code.unwrap_or(String::new());
             let room_join = self.try_join_room(&code);
@@ -118,9 +118,9 @@ impl GameServer {
 
                     let reference = self.get_room(room_id).unwrap();
 
-                    self.initialize_player(id, 1).await;
+                    self.initialize_player(id, PlayerRole::Two).await;
                     self.room_player_add(&reference).await;
-                    self.send_game_info(id, &reference).await;
+                    self.send_game_info(&reference, id).await;
                 }
             }
         }
@@ -137,7 +137,7 @@ impl GameServer {
         if let None = ctx {
             return;
         }
-        let (client, room) = ctx.unwrap();
+        let (_client, room) = ctx.unwrap();
         let room_id = room.id();
 
         if room.inner().has_started {
@@ -146,7 +146,13 @@ impl GameServer {
 
         drop(room);
 
-        client.room_player.as_mut().unwrap().ready = ready;
+        self.all_clients
+            .get_mut(id)
+            .unwrap()
+            .room_player
+            .as_mut()
+            .unwrap()
+            .ready = ready;
         let reference = self.get_room(room_id).unwrap();
         self.room_update_ready_state(&reference, id, ready).await;
 
@@ -184,11 +190,17 @@ impl GameServer {
         if let None = ctx {
             return;
         }
-        let (client, room) = ctx.unwrap();
+        let (_client, room) = ctx.unwrap();
         let room_id = room.id();
         drop(room);
 
-        client.room_player.as_mut().unwrap().icon = icon as u8;
+        self.all_clients
+            .get_mut(id)
+            .unwrap()
+            .room_player
+            .as_mut()
+            .unwrap()
+            .icon = icon as u8;
         let reference = self.get_room(room_id).unwrap();
 
         if icon > 12 {

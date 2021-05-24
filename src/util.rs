@@ -27,6 +27,16 @@ pub fn unix_timestamp_to(to: Duration) -> u64 {
         .as_secs()
 }
 
+#[macro_export]
+macro_rules! unwrap_ret {
+    ( $e:expr ) => {
+        match $e {
+            Some(x) => x,
+            None => return,
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

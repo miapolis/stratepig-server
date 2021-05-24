@@ -7,7 +7,7 @@ impl GameServer {
         self.message_one(id, packet).await;
     }
 
-    pub async fn initialize_player(&self, id: usize, role: u8) {
+    pub async fn initialize_player(&self, id: usize, role: PlayerRole) {
         let mut packet = Packet::new_id(ServerMessage::ClientInfo as i32);
         packet.write_u32(role as u32);
         self.message_one(id, packet).await;
@@ -31,14 +31,14 @@ impl GameServer {
         }
     }
 
-    pub async fn client_disconnected(&self, id: usize, room: &GameRoom) {
+    pub async fn client_disconnected(&self, room: &GameRoom, id: usize) {
         let mut packet = Packet::new_id(ServerMessage::ClientDisconnect as i32);
         packet.write_str(&id.to_string());
         packet.write_u64(0); // TODO: actually calculate elapsed unix timestamp
         self.message_room(room, packet).await;
     }
 
-    pub async fn send_game_info(&self, id: usize, room: &GameRoom) {
+    pub async fn send_game_info(&self, room: &GameRoom, id: usize) {
         let room = room.inner();
 
         let mut packet = Packet::new_id(ServerMessage::GameInfo as i32);

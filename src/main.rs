@@ -22,12 +22,13 @@ mod lobby;
 mod log_init;
 mod packet;
 mod player;
+mod test_util;
 mod util;
 use client::Client;
 use config::Config;
 use gameroom::{GameRoom, GameRoomError};
 use packet::{ClientMessage::*, ServerMessage};
-use player::PlayerRole;
+use player::{Player, PlayerRole};
 
 type PacketHandler = fn(&mut GameServer, usize, Packet) -> Pin<Box<dyn Future<Output = ()> + '_>>;
 
@@ -74,6 +75,8 @@ impl GameServer {
         register!(UpdatePigIcon, Self::handle_update_icon);
         register!(UpdateSettingsValue, Self::handle_settings_value_update);
         register!(FinishedSceneLoad, Self::handle_client_finish_scene_load);
+        register!(GamePlayerReadyData, Self::handle_game_player_ready);
+        register!(Move, Self::move_received);
     }
 
     async fn start(&mut self) {
@@ -122,7 +125,7 @@ impl GameServer {
                     drop(write);
 
                     if client_ids.len() >= 1 {
-                        self.client_disconnected(id, &room).await;
+                        self.client_disconnected(&room, id).await;
                     }
 
                     // Now we can drop the room
@@ -256,11 +259,24 @@ impl GameServer {
         }
     }
 
-    pub fn get_context(
-        &mut self,
-        id: usize,
-    ) -> Option<(&mut Client, impl Deref<Target = GameRoom> + '_)> {
-        let client = self.all_clients.get_mut(id).unwrap();
+    pub fn get_client(&self, id: usize) -> Option<&Client> {
+        self.all_clients.get(id)
+    }
+
+    pub fn get_player(&self, id: usize) -> Option<&Player> {
+        self.get_client(id)?.player.as_ref()
+    }
+
+    pub fn get_client_mut(&mut self, id: usize) -> Option<&mut Client> {
+        self.all_clients.get_mut(id)
+    }
+
+    pub fn get_player_mut(&mut self, id: usize) -> Option<&mut Player> {
+        self.get_client_mut(id)?.player.as_mut()
+    }
+
+    pub fn get_context(&self, id: usize) -> Option<(&Client, impl Deref<Target = GameRoom> + '_)> {
+        let client = self.all_clients.get(id).unwrap();
         let room_id = client.game_room_id;
         if room_id == 0 || client.room_player.is_none() {
             return None;

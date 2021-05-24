@@ -19,10 +19,10 @@ pub struct GameRoomInner {
     pub client_ids: Vec<usize>,
     pub has_started: bool,
     pub settings: GameRoomSettings,
-
     pub last_seen_at: u64,
 
     pub room_ticker: Option<tokio::task::JoinHandle<()>>,
+    pub current_phase: u8,
 }
 
 type Inner = Arc<RwLock<GameRoomInner>>;
@@ -37,10 +37,10 @@ impl GameRoom {
             client_ids: Vec::new(),
             has_started: false,
             settings: GameRoomSettings::new(GameMode::Original, 600, 15, 300),
-
             last_seen_at: unix_now(),
 
             room_ticker: None,
+            current_phase: 1,
         })))
     }
 

@@ -1,6 +1,8 @@
 use crate::GameServer;
 use crate::Packet;
+mod game;
 mod send;
+mod start;
 
 impl GameServer {
     pub async fn handle_client_finish_scene_load(&mut self, id: usize, mut packet: Packet) {
@@ -13,12 +15,18 @@ impl GameServer {
         if let None = ctx {
             return;
         }
-        let (client, room) = ctx.unwrap();
+        let (_client, room) = ctx.unwrap();
         let room_id = room.id();
         drop(room);
 
         if scene_index <= 2 {
-            client.player.as_mut().unwrap().scene_index = 2;
+            self.all_clients
+                .get_mut(id)
+                .unwrap()
+                .player
+                .as_mut()
+                .unwrap()
+                .scene_index = 2;
         }
 
         let reference = self.get_room(room_id).unwrap();

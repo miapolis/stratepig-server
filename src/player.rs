@@ -12,17 +12,18 @@ pub struct Player {
     pub current_buffer: u32,
 
     pub board: Board,
+    pub init_board: Board,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum PlayerRole {
-    One,
-    Two,
+    One = 1,
+    Two = 2,
 }
 
 impl Player {
     /// Constructs a new player instance given a role
-    pub fn new(role: PlayerRole) -> Self {
+    fn new(role: PlayerRole) -> Self {
         Self {
             role,
             scene_index: 1,
@@ -31,7 +32,13 @@ impl Player {
             current_time: 0,
             current_buffer: 0,
             board: Board::new(),
+            init_board: Board::new(),
         }
+    }
+
+    pub fn initialize_setup(&mut self, setup: Vec<Piece>) {
+        self.init_board = setup.clone();
+        self.board = setup;
     }
 }
 
