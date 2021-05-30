@@ -24,6 +24,7 @@ mod packet;
 mod player;
 mod test_util;
 mod util;
+mod macros;
 use client::Client;
 use config::Config;
 use gameroom::{GameRoom, GameRoomError};

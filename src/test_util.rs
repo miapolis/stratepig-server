@@ -27,6 +27,7 @@ pub fn print_path(piece: u8, path: Vec<u8>) {
     }
 }
 
+#[allow(dead_code)]
 pub fn print_board(board: &Board) {
     println!("---------------------");
     for row in 0..10 {

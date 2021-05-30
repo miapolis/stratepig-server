@@ -15,6 +15,10 @@ impl GameServer {
             return;
         }
         let (client, room) = ctx.unwrap();
+        if !room.inner().has_started {
+            return;
+        }
+
         let room_id = room.id();
         drop(room); // TODO: FIX THIS NOW
         if client.player.as_ref().is_none() {

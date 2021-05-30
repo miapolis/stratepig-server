@@ -6,9 +6,19 @@ const STARTING_TERRITORY_VALUE: u8 = 40;
 pub const WATER_TILES: [u8; 8] = [43, 44, 47, 48, 53, 54, 57, 58];
 
 pub enum InteractionResult {
-    Win,
-    Lose,
-    Tie,
+    Win = 1,
+    Lose = 0,
+    Tie = -1,
+}
+
+impl InteractionResult {
+    pub fn invert(&self) -> Self {
+        match self {
+            Self::Win => Self::Lose,
+            Self::Lose => Self::Win,
+            _ => Self::Tie,
+        }
+    }
 }
 
 macro_rules! rank_eval {
@@ -30,15 +40,9 @@ pub trait PigBehavior {
         get_adjacent(from).contains(&to)
     }
     fn attack(&self, me: Pig, target: Pig) -> InteractionResult {
-        // TODO: make sure this is included in main code!
-        // let target_behavior = target.get_behavior();
-        // if let Some(result) = target_behavior.defense_override(me) {
-        //     return !result // Target winning = current losing... inverse required
-        // }
-
         rank_eval!(me, target)
     }
-    fn defense_override(&self, _attacker: Pig) -> Option<bool> {
+    fn defense_override(&self, _attacker: Pig) -> Option<InteractionResult> {
         None
     }
 }
@@ -84,11 +88,11 @@ impl PigBehavior for Bomb {
     fn allow_move(&self, _from: u8, _to: u8) -> bool {
         false
     }
-    fn defense_override(&self, attacker: Pig) -> Option<bool> {
+    fn defense_override(&self, attacker: Pig) -> Option<InteractionResult> {
         if attacker == Pig::Miner {
-            return Some(false);
+            return Some(InteractionResult::Lose);
         }
-        Some(true)
+        Some(InteractionResult::Win)
     }
 }
 struct Spy;
@@ -105,8 +109,8 @@ impl PigBehavior for Flag {
     fn allow_move(&self, _from: u8, _to: u8) -> bool {
         false
     }
-    fn defense_override(&self, _attacker: Pig) -> Option<bool> {
-        Some(false)
+    fn defense_override(&self, _attacker: Pig) -> Option<InteractionResult> {
+        Some(InteractionResult::Lose)
     }
 }
 struct Scout;
@@ -305,6 +309,44 @@ pub fn sum_boards(local: &Board, opp: &Board) -> Board {
     board.append(&mut local.clone());
     board.append(&mut opp.clone());
     board
+}
+
+pub fn pig_in_path(total_board: &Board, from: u8, to: u8) -> bool {
+    let right_or_up = to > from;
+    let row_from = (from - 1) / 10;
+    let row_to = (to - 1) / 10;
+
+    macro_rules! check {
+        ($loc:expr) => {
+            if total_board.iter().any(|x| x.location == $loc) {
+                return true;
+            }
+        };
+    }
+
+    if right_or_up {
+        if row_from == row_to {
+            for i in from + 1..to {
+                check!(i);
+            }
+        } else {
+            for i in (from + 10..to).step_by(10) {
+                check!(i);
+            }
+        }
+    } else {
+        if row_from == row_to {
+            for i in to + 1..from {
+                check!(i);
+            }
+        } else {
+            for i in (to + 10..from).step_by(10) {
+                check!(i);
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]

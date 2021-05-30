@@ -2,6 +2,7 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::{RwLock, RwLockReadGuard};
+use std::time::Duration;
 use tokio::time;
 
 use crate::board::Pig;
@@ -10,7 +11,10 @@ use crate::util::unix_now;
 use crate::util::unix_timestamp_to;
 use crate::GameServer;
 use crate::Packet;
+use crate::player::PlayerRole;
 use crate::ServerMessage;
+
+use crate::message_room;
 
 #[derive(Debug)]
 pub struct GameRoomInner {
@@ -21,8 +25,9 @@ pub struct GameRoomInner {
     pub settings: GameRoomSettings,
     pub last_seen_at: u64,
 
-    pub room_ticker: Option<tokio::task::JoinHandle<()>>,
     pub current_phase: u8,
+    pub room_ticker: Option<tokio::task::JoinHandle<()>>,
+    pub game_ticker: Option<tokio::task::JoinHandle<()>>,
 }
 
 type Inner = Arc<RwLock<GameRoomInner>>;
@@ -39,8 +44,9 @@ impl GameRoom {
             settings: GameRoomSettings::new(GameMode::Original, 600, 15, 300),
             last_seen_at: unix_now(),
 
-            room_ticker: None,
             current_phase: 1,
+            room_ticker: None,
+            game_ticker: None,
         })))
     }
 
@@ -66,7 +72,7 @@ impl GameRoom {
 
     pub async fn start(&self, game: &GameServer) {
         let inner = self.get().clone();
-        let duration = std::time::Duration::from_secs(5);
+        let duration = Duration::from_secs(5);
         let timestamp = unix_timestamp_to(duration);
 
         let mut packet = Packet::new_id(ServerMessage::RoomTimerUpdate as i32);
@@ -75,8 +81,9 @@ impl GameRoom {
 
         let handle = tokio::task::spawn(async move {
             time::sleep(duration).await;
+            inner.write().unwrap().has_started = true;
         });
-        inner.write().unwrap().room_ticker = Some(handle);
+        self.get().write().unwrap().room_ticker = Some(handle);
     }
 
     pub fn cancel_start(&self) {
@@ -85,6 +92,33 @@ impl GameRoom {
             t.abort();
             write.room_ticker = None;
         }
+    }
+
+    pub async fn player_timer_start(&self, role: PlayerRole, game: &GameServer) {
+        let inner = self.get().clone();
+        let turn_duration = Duration::from_secs(inner.read().unwrap().settings.turn_time as u64);
+        let turn_timestamp = unix_timestamp_to(turn_duration);
+        let server = game.server.clone();
+
+        let mut packet = Packet::new_id(ServerMessage::GameTimerUpdate as i32);
+        packet.write_u32(role as u32);
+        packet.write_u64(turn_timestamp);
+        packet.write_bool(false);
+        game.message_room(self, packet).await;
+
+        let handle = tokio::task::spawn(async move {
+            time::sleep(turn_duration).await;
+
+            let buffer_duration = Duration::from_secs(inner.read().unwrap().settings.buffer_time as u64);
+            let buffer_timestamp = unix_timestamp_to(buffer_duration);
+
+            let mut packet = Packet::new_id(ServerMessage::GameTimerUpdate as i32);
+            packet.write_u32(role as u32);
+            packet.write_u64(buffer_timestamp);
+            packet.write_bool(true);
+            message_room!(server, inner, packet);
+        });
+        self.get().write().unwrap().game_ticker = Some(handle);
     }
 }
 

@@ -8,8 +8,7 @@ pub struct Player {
     pub is_ready: bool,
     pub play_again: bool,
 
-    pub current_time: u32,
-    pub current_buffer: u32,
+    pub current_buffer: u64,
 
     pub board: Board,
     pub init_board: Board,
@@ -29,7 +28,6 @@ impl Player {
             scene_index: 1,
             is_ready: false,
             play_again: false,
-            current_time: 0,
             current_buffer: 0,
             board: Board::new(),
             init_board: Board::new(),
