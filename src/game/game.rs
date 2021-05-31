@@ -1,10 +1,12 @@
+use std::convert::TryInto;
+
 use crate::board::{self, Pig};
 // use crate::test_util;
 use crate::board::InteractionResult;
 use crate::unwrap_ret;
 use crate::GameServer;
 use crate::Packet;
-use std::convert::TryInto;
+use crate::win::WinType;
 
 impl GameServer {
     pub async fn move_received(&mut self, id: usize, mut packet: Packet) {
@@ -21,7 +23,12 @@ impl GameServer {
         if client.player.as_ref().is_none() {
             return;
         }
-        if room.inner().current_phase != 2 {
+        if room.inner().game_phase != 2 || room.inner().game_ended {
+            return;
+        }
+
+        let current_turn = room.inner().current_turn;
+        if client.player.as_ref().unwrap().role != current_turn {
             return;
         }
 
@@ -51,6 +58,7 @@ impl GameServer {
         let initiator = unwrap_ret!(local_board.iter().find(|x| x.location == from_location));
         let target_opt = local_board.iter().find(|x| x.location == to_location);
         let target_opp_opt = opponent_board.iter().find(|x| x.location == to_location);
+        let attack = target_opp_opt.is_some();
 
         // test_util::print_board(&total_board);
 
@@ -106,6 +114,11 @@ impl GameServer {
             let init_type = initiator.pig;
             let target_type = target.pig;
 
+            // TODO: Allow for infiltration and other conditions to occur
+            if target_type == Pig::Flag {
+                self.broadcast_win(&room, player.role, WinType::FlagCapture).await;
+            }
+
             if let InteractionResult::Tie = interaction {
                 local_board.remove(index!(from_location, local_board));
                 opponent_board.remove(index!(to_location, opponent_board));
@@ -133,5 +146,12 @@ impl GameServer {
             self.get_player_mut(id).unwrap().board = local_board;
             self.get_player_mut(opp_id).unwrap().board = board::flip_board(&opponent_board);
         }
+
+        let room = self.get_room(1).unwrap();
+        let room_id = room.id();
+        room.get().write().unwrap().current_turn = current_turn.opp();
+        drop(room);
+
+        self.turn_start(room_id, attack).await;
     }
 }

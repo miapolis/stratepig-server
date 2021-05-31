@@ -62,4 +62,22 @@ impl GameServer {
 
         self.message_room(room, packet).await;
     }
+
+    pub async fn send_win(
+        &self,
+        room: &GameRoom,
+        role: PlayerRole,
+        win_type: win::WinType,
+        elapsed: u64,
+        immediate: bool,
+    ) {
+        let mut packet = Packet::new_id(ServerMessage::Win as i32);
+
+        packet.write_u32(role as u32);
+        packet.write_u32(win_type as u32);
+        packet.write_u64(elapsed);
+        packet.write_bool(immediate);
+
+        self.message_room(room, packet).await;
+    }
 }

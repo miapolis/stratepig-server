@@ -1,8 +1,10 @@
-use crate::board::{self, Piece, Pig};
-use crate::Packet;
-use crate::{GameRoom, GameServer};
 use std::collections::HashMap;
 use std::convert::TryInto;
+
+use crate::board::{self, Piece, Pig};
+use crate::util;
+use crate::GameServer;
+use crate::Packet;
 
 impl GameServer {
     pub async fn handle_game_player_ready(&mut self, id: usize, mut packet: Packet) {
@@ -15,10 +17,9 @@ impl GameServer {
             return;
         }
         let (client, room) = ctx.unwrap();
-        if !room.inner().has_started {
+        if !room.inner().in_game || room.inner().game_phase == 2 {
             return;
         }
-
         let room_id = room.id();
         drop(room); // TODO: FIX THIS NOW
         if client.player.as_ref().is_none() {
@@ -92,18 +93,19 @@ impl GameServer {
         self.game_player_ready_state(&reference, id, true).await;
 
         if let Some(res) = self.get_other_player(&reference, id) {
+            drop(reference);
             if let Some(player) = &res.player {
                 if player.is_ready {
-                    self.register_board_data(&reference).await;
-                    drop(reference);
+                    self.register_board_data(room_id).await;
                 }
             }
         }
     }
 
-    async fn register_board_data(&self, room: &GameRoom) {
+    async fn register_board_data(&mut self, room_id: usize) {
+        let room = self.get_room(room_id).unwrap();
+
         for id in room.inner().client_ids.iter() {
-            // let player = self.all_clients.get(*id).unwrap().player.as_ref().unwrap();
             let mut locations = Vec::new();
 
             if self.config.one_player {
@@ -122,6 +124,43 @@ impl GameServer {
             self.opponent_pig_placement(*id, locations).await;
         }
 
-        room.get().write().unwrap().current_phase = 2;
+        room.start_phase_two().await;
+        let clients = room.clients();
+        let buffer = room.inner().settings.buffer_time;
+        drop(room);
+
+        for id in clients {
+            let player = self.get_player_mut(id).unwrap();
+            player.current_buffer = buffer as u64;
+        }
+
+        self.turn_start(room_id, false).await;
+    }
+
+    pub async fn turn_start(&mut self, room_id: usize, delay: bool) {
+        let room = self.get_room(room_id).unwrap();
+
+        let mut write = room.get().write().unwrap();
+        if let Some(t) = &write.game_ticker {
+            t.abort();
+            write.game_ticker = None;
+        }
+        drop(write);
+
+        room.start_player_turn(self, delay).await;
+
+        // Set the remaining buffer time for the other player
+        // (start of new turn marks end of previous turn)
+        let timestamp = room.inner().last_buffer_timestamp;
+        let other_id = room.other_id(room.get_active_id(self));
+
+        if let Some(timestamp) = timestamp {
+            room.get().write().unwrap().last_buffer_timestamp = None;
+            drop(room);
+
+            let diff = util::unix_now() - timestamp;
+            let player = self.get_player_mut(other_id).unwrap();
+            player.current_buffer -= diff;
+        }
     }
 }

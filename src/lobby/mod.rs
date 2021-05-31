@@ -140,7 +140,7 @@ impl GameServer {
         let (_client, room) = ctx.unwrap();
         let room_id = room.id();
 
-        if room.inner().has_started {
+        if room.inner().in_game {
             return;
         }
 

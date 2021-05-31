@@ -3,6 +3,7 @@ use crate::Packet;
 mod game;
 mod send;
 mod start;
+mod win;
 
 impl GameServer {
     pub async fn handle_client_finish_scene_load(&mut self, id: usize, mut packet: Packet) {
@@ -16,6 +17,9 @@ impl GameServer {
             return;
         }
         let (_client, room) = ctx.unwrap();
+        if !room.inner().in_game || room.inner().game_phase == 2 {
+            return;
+        }
         let room_id = room.id();
         drop(room);
 

@@ -14,10 +14,19 @@ pub struct Player {
     pub init_board: Board,
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum PlayerRole {
     One = 1,
     Two = 2,
+}
+
+impl PlayerRole {
+    pub fn opp(&self) -> Self {
+        match self {
+            Self::One => Self::Two,
+            Self::Two => Self::One,
+        }
+    }
 }
 
 impl Player {

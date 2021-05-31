@@ -20,11 +20,12 @@ mod game;
 mod gameroom;
 mod lobby;
 mod log_init;
+mod macros;
 mod packet;
 mod player;
 mod test_util;
 mod util;
-mod macros;
+mod win;
 use client::Client;
 use config::Config;
 use gameroom::{GameRoom, GameRoomError};
@@ -118,7 +119,7 @@ impl GameServer {
                     write
                         .client_ids
                         .remove(client_ids.iter().position(|x| *x == id).unwrap());
-                    write.has_started = false;
+                    write.in_game = false;
                     write.abort_all_tickers(); // Nothing is functional with only one player, tickers don't need to be running
                     client_ids = write.client_ids.clone();
 
@@ -249,7 +250,7 @@ impl GameServer {
         let room = self.get_room_by_code(code);
         match room {
             Some(room) => {
-                if room.inner().has_started {
+                if room.inner().in_game {
                     return Err(GameRoomError::Started);
                 } else if room.clients().len() >= 2 {
                     return Err(GameRoomError::Full);

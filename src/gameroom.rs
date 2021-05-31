@@ -7,11 +7,12 @@ use tokio::time;
 
 use crate::board::Pig;
 use crate::client::Client;
+use crate::player::PlayerRole;
 use crate::util::unix_now;
 use crate::util::unix_timestamp_to;
+use crate::win::WinType;
 use crate::GameServer;
 use crate::Packet;
-use crate::player::PlayerRole;
 use crate::ServerMessage;
 
 use crate::message_room;
@@ -21,13 +22,17 @@ pub struct GameRoomInner {
     pub id: usize,
     pub code: String,
     pub client_ids: Vec<usize>,
-    pub has_started: bool,
+    pub in_game: bool,
+    pub game_phase: u8,
+    pub game_ended: bool,
     pub settings: GameRoomSettings,
     pub last_seen_at: u64,
 
-    pub current_phase: u8,
+    pub current_turn: PlayerRole,
     pub room_ticker: Option<tokio::task::JoinHandle<()>>,
     pub game_ticker: Option<tokio::task::JoinHandle<()>>,
+    pub last_buffer_timestamp: Option<u64>,
+    pub game_start_timestamp: Option<u64>,
 }
 
 type Inner = Arc<RwLock<GameRoomInner>>;
@@ -40,13 +45,17 @@ impl GameRoom {
             id,
             code,
             client_ids: Vec::new(),
-            has_started: false,
+            in_game: false,
+            game_phase: 1,
+            game_ended: false,
             settings: GameRoomSettings::new(GameMode::Original, 600, 15, 300),
             last_seen_at: unix_now(),
 
-            current_phase: 1,
+            current_turn: PlayerRole::One,
             room_ticker: None,
             game_ticker: None,
+            last_buffer_timestamp: None,
+            game_start_timestamp: None,
         })))
     }
 
@@ -70,6 +79,23 @@ impl GameRoom {
         self.0.write().unwrap().settings = GameRoomSettings::default();
     }
 
+    pub fn other_id(&self, id: usize) -> usize {
+        let clients = self.clients();
+        let other: Vec<&usize> = clients.iter().filter(|x| **x != id).collect();
+        *other[0]
+    }
+
+    pub fn get_active_id(&self, game: &GameServer) -> usize {
+        let role = self.inner().current_turn;
+        for id in self.clients().iter() {
+            let player = game.get_player(*id).unwrap();
+            if player.role == role {
+                return *id;
+            }
+        }
+        0
+    }
+
     pub async fn start(&self, game: &GameServer) {
         let inner = self.get().clone();
         let duration = Duration::from_secs(5);
@@ -81,7 +107,7 @@ impl GameRoom {
 
         let handle = tokio::task::spawn(async move {
             time::sleep(duration).await;
-            inner.write().unwrap().has_started = true;
+            inner.write().unwrap().in_game = true;
         });
         self.get().write().unwrap().room_ticker = Some(handle);
     }
@@ -94,28 +120,78 @@ impl GameRoom {
         }
     }
 
-    pub async fn player_timer_start(&self, role: PlayerRole, game: &GameServer) {
+    pub async fn start_phase_two(&self) {
+        let mut write = self.get().write().unwrap();
+        write.game_phase = 2;
+        write.game_start_timestamp = Some(unix_now());
+    }
+
+    pub async fn start_player_turn(&self, game: &GameServer, delay: bool) {
+        let role = self.inner().current_turn;
+
         let inner = self.get().clone();
-        let turn_duration = Duration::from_secs(inner.read().unwrap().settings.turn_time as u64);
-        let turn_timestamp = unix_timestamp_to(turn_duration);
         let server = game.server.clone();
 
-        let mut packet = Packet::new_id(ServerMessage::GameTimerUpdate as i32);
-        packet.write_u32(role as u32);
-        packet.write_u64(turn_timestamp);
-        packet.write_bool(false);
-        game.message_room(self, packet).await;
+        let player = game.get_player(self.get_active_id(game));
+        if player.is_none() {
+            return;
+        }
+        let player_buffer = player.unwrap().current_buffer;
 
         let handle = tokio::task::spawn(async move {
+            if delay {
+                time::sleep(Duration::from_secs(4)).await;
+            }
+
+            let mut packet = Packet::new_id(ServerMessage::TurnInit as i32);
+            packet.write_u32(role as u32);
+            {
+                // For some weird reason this is required to be in a separate scope
+                message_room!(server, inner, packet);
+            }
+
+            let turn_duration =
+                Duration::from_secs(inner.read().unwrap().settings.turn_time as u64);
+            let turn_timestamp = unix_timestamp_to(turn_duration);
+
+            let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
+            packet.write_u32(role as u32);
+            packet.write_u64(turn_timestamp);
+            packet.write_bool(false);
+            {
+                message_room!(server, inner, packet);
+            }
+
             time::sleep(turn_duration).await;
 
-            let buffer_duration = Duration::from_secs(inner.read().unwrap().settings.buffer_time as u64);
+            let buffer_duration = Duration::from_secs(player_buffer as u64);
             let buffer_timestamp = unix_timestamp_to(buffer_duration);
 
-            let mut packet = Packet::new_id(ServerMessage::GameTimerUpdate as i32);
+            let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
             packet.write_u32(role as u32);
             packet.write_u64(buffer_timestamp);
             packet.write_bool(true);
+            {
+                message_room!(server, inner, packet);
+            }
+
+            inner.write().unwrap().last_buffer_timestamp = Some(unix_now());
+
+            time::sleep(buffer_duration).await;
+
+            inner.write().unwrap().game_ended = true;
+
+            let read = inner.read().unwrap();
+            let start = read.game_start_timestamp.unwrap_or(unix_now());
+            let elapsed = unix_now() - start;
+
+            let mut packet = Packet::new_id(ServerMessage::Win as i32);
+            packet.write_u32(read.current_turn.opp() as u32);
+            packet.write_u32(WinType::OutOfTime as u32);
+            packet.write_u64(elapsed);
+            packet.write_bool(WinType::OutOfTime.immediate());
+            drop(read);
+
             message_room!(server, inner, packet);
         });
         self.get().write().unwrap().game_ticker = Some(handle);
@@ -127,6 +203,10 @@ impl GameRoomInner {
         if let Some(t) = &self.room_ticker {
             t.abort();
             self.room_ticker = None;
+        }
+        if let Some(t) = &self.game_ticker {
+            t.abort();
+            self.game_ticker = None;
         }
     }
 }
