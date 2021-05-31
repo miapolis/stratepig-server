@@ -126,6 +126,23 @@ impl GameServer {
         }
     }
 
+    pub async fn handle_client_leave(&mut self, id: usize, mut packet: Packet) {
+        let id_check = packet.read_string().unwrap_or(String::new());
+
+        if id.to_string() != id_check {
+            return;
+        }
+        let ctx = self.get_context(id);
+        if let None = ctx {
+            return;
+        }
+        let (_client, room) = ctx.unwrap();
+        let room_id = room.id();
+        drop(room);
+
+        self.handle_client_disconnect(room_id, id).await;
+    }
+
     pub async fn handle_ready_state_change(&mut self, id: usize, mut packet: Packet) {
         let id_check = packet.read_string().unwrap_or(String::new());
         let ready = packet.read_bool().unwrap_or(false);

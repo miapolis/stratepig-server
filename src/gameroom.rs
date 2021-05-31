@@ -87,6 +87,9 @@ impl GameRoom {
 
     pub fn get_active_id(&self, game: &GameServer) -> usize {
         let role = self.inner().current_turn;
+        if self.clients().len() != 2 {
+            panic!("Not enought clients!");
+        }
         for id in self.clients().iter() {
             let player = game.get_player(*id).unwrap();
             if player.role == role {
@@ -137,6 +140,7 @@ impl GameRoom {
             return;
         }
         let player_buffer = player.unwrap().current_buffer;
+        let mut write = self.get().write().unwrap();
 
         let handle = tokio::task::spawn(async move {
             if delay {
@@ -194,7 +198,8 @@ impl GameRoom {
 
             message_room!(server, inner, packet);
         });
-        self.get().write().unwrap().game_ticker = Some(handle);
+        write.game_ticker = Some(handle);
+        println!("ADDED!!!")
     }
 }
 
@@ -206,6 +211,7 @@ impl GameRoomInner {
         }
         if let Some(t) = &self.game_ticker {
             t.abort();
+            println!("TERMINATED GAME!");
             self.game_ticker = None;
         }
     }

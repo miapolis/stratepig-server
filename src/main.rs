@@ -73,6 +73,7 @@ impl GameServer {
 
         // rustfmt friendly
         register!(GameRequestSent, Self::handle_game_request);
+        register!(LeaveGame, Self::handle_client_leave);
         register!(UpdateReadyState, Self::handle_ready_state_change);
         register!(UpdatePigIcon, Self::handle_update_icon);
         register!(UpdateSettingsValue, Self::handle_settings_value_update);
@@ -106,42 +107,46 @@ impl GameServer {
         self.message_one(id, packet).await;
     }
 
-    // TODO: Handle disconnection better and inform other client in room
     async fn handle_disconnect(&mut self, id: usize) {
         if let Some(client) = self.all_clients.get(id) {
-            if client.game_room_id != 0 {
-                let result = self.get_room(client.game_room_id);
-                if let Some(_) = result {
-                    let room = result.unwrap();
-                    let mut client_ids = room.inner().client_ids.clone();
-                    let mut write = room.get().write().unwrap();
-
-                    write
-                        .client_ids
-                        .remove(client_ids.iter().position(|x| *x == id).unwrap());
-                    write.in_game = false;
-                    write.abort_all_tickers(); // Nothing is functional with only one player, tickers don't need to be running
-                    client_ids = write.client_ids.clone();
-
-                    // Drop write before room to prevent deadlock
-                    drop(write);
-
-                    if client_ids.len() >= 1 {
-                        self.client_disconnected(&room, id).await;
-                    }
-
-                    // Now we can drop the room
-                    drop(room);
-
-                    if client_ids.len() == 1 {
-                        // If there is still someone left, we have to worry about whether or not
-                        // they need to be made the host of the room
-                        self.handle_transfer_ownership(id, client_ids[0]).await;
-                    }
-                }
+            let game_room_id = client.game_room_id;
+            if game_room_id != 0 {
+                self.handle_client_disconnect(game_room_id, id).await;
             }
 
             self.all_clients.remove(id);
+        }
+    }
+
+    async fn handle_client_disconnect(&mut self, room_id: usize, id: usize) {
+        let result = self.get_room(room_id);
+        if let Some(_) = result {
+            let room = result.unwrap();
+            let mut client_ids = room.inner().client_ids.clone();
+            let mut write = room.get().write().unwrap();
+
+            write
+                .client_ids
+                .remove(client_ids.iter().position(|x| *x == id).unwrap());
+            write.in_game = false;
+            write.abort_all_tickers(); // Nothing is functional with only one player, tickers don't need to be running
+            client_ids = write.client_ids.clone();
+
+            // Drop write before room to prevent deadlock
+            drop(write);
+
+            if client_ids.len() >= 1 {
+                self.client_disconnected(&room, id).await;
+            }
+
+            // Now we can drop the room
+            drop(room);
+
+            if client_ids.len() == 1 {
+                // If there is still someone left, we have to worry about whether or not
+                // they need to be made the host of the room
+                self.handle_transfer_ownership(id, client_ids[0]).await;
+            }
         }
     }
 
@@ -219,6 +224,7 @@ impl GameServer {
 
         let room = GameRoom::new(id, code);
         game_rooms.insert(id, room);
+        println!("CREATED ROOM WITH ID {}", id);
         Ok(MutexGuard::map(game_rooms, |g| g.get_mut(id).unwrap()))
     }
 

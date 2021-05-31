@@ -4,9 +4,9 @@ use crate::board::{self, Pig};
 // use crate::test_util;
 use crate::board::InteractionResult;
 use crate::unwrap_ret;
+use crate::win::WinType;
 use crate::GameServer;
 use crate::Packet;
-use crate::win::WinType;
 
 impl GameServer {
     pub async fn move_received(&mut self, id: usize, mut packet: Packet) {
@@ -19,6 +19,7 @@ impl GameServer {
             return;
         }
         let (client, room) = ctx.unwrap();
+        let room_id = room.id();
 
         if client.player.as_ref().is_none() {
             return;
@@ -116,7 +117,9 @@ impl GameServer {
 
             // TODO: Allow for infiltration and other conditions to occur
             if target_type == Pig::Flag {
-                self.broadcast_win(&room, player.role, WinType::FlagCapture).await;
+                room.get().write().unwrap().game_ended = true;
+                self.broadcast_win(&room, player.role, WinType::FlagCapture)
+                    .await;
             }
 
             if let InteractionResult::Tie = interaction {
@@ -147,8 +150,12 @@ impl GameServer {
             self.get_player_mut(opp_id).unwrap().board = board::flip_board(&opponent_board);
         }
 
-        let room = self.get_room(1).unwrap();
-        let room_id = room.id();
+        let room = self.get_room(room_id).unwrap();
+
+        if room.inner().game_ended {
+            return;
+        }
+
         room.get().write().unwrap().current_turn = current_turn.opp();
         drop(room);
 
