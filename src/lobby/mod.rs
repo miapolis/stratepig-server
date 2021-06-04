@@ -71,7 +71,7 @@ impl GameServer {
 
             self.initialize_player(id, PlayerRole::One).await;
             self.room_player_add(&reference).await;
-            self.send_game_info(&reference, id).await;
+            self.send_game_info(&reference, Some(id)).await;
         } else {
             let code = code.unwrap_or(String::new());
             let room_join = self.try_join_room(&code);
@@ -120,7 +120,7 @@ impl GameServer {
 
                     self.initialize_player(id, PlayerRole::Two).await;
                     self.room_player_add(&reference).await;
-                    self.send_game_info(&reference, id).await;
+                    self.send_game_info(&reference, Some(id)).await;
                 }
             }
         }

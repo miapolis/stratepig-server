@@ -87,16 +87,13 @@ impl GameRoom {
 
     pub fn get_active_id(&self, game: &GameServer) -> usize {
         let role = self.inner().current_turn;
-        if self.clients().len() != 2 {
-            panic!("Not enought clients!");
-        }
         for id in self.clients().iter() {
             let player = game.get_player(*id).unwrap();
             if player.role == role {
                 return *id;
             }
         }
-        0
+        panic!("Client options exhausted!");
     }
 
     pub async fn start(&self, game: &GameServer) {
@@ -199,7 +196,20 @@ impl GameRoom {
             message_room!(server, inner, packet);
         });
         write.game_ticker = Some(handle);
-        println!("ADDED!!!")
+    }
+
+    pub fn reset(&self) {
+        let mut write = self.get().write().unwrap();
+
+        write.current_turn = PlayerRole::One;
+        write.game_phase = 1;
+        write.in_game = false;
+        write.game_ended = false;
+
+        write.last_buffer_timestamp = None;
+        write.game_start_timestamp = None;
+
+        write.abort_all_tickers();
     }
 }
 
@@ -211,7 +221,6 @@ impl GameRoomInner {
         }
         if let Some(t) = &self.game_ticker {
             t.abort();
-            println!("TERMINATED GAME!");
             self.game_ticker = None;
         }
     }

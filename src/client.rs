@@ -24,4 +24,12 @@ impl Client {
     pub fn set_player(&mut self, player: Player) {
         self.player = Some(player);
     }
+
+    pub fn reset(&mut self) {
+        if self.player.is_none() || self.room_player.is_none() {
+            return;
+        }
+        self.room_player.as_mut().unwrap().reset();
+        self.player.as_mut().unwrap().reset();
+    }
 }

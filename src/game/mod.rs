@@ -1,3 +1,5 @@
+use std::convert::TryInto;
+
 use crate::GameServer;
 use crate::Packet;
 mod game;
@@ -17,7 +19,7 @@ impl GameServer {
             return;
         }
         let (_client, room) = ctx.unwrap();
-        if !room.inner().in_game || room.inner().game_phase == 2 {
+        if room.inner().game_phase == 2 {
             return;
         }
         let room_id = room.id();
@@ -30,7 +32,7 @@ impl GameServer {
                 .player
                 .as_mut()
                 .unwrap()
-                .scene_index = 2;
+                .scene_index = scene_index.try_into().unwrap_or(2);
         }
 
         let reference = self.get_room(room_id).unwrap();
@@ -43,6 +45,16 @@ impl GameServer {
                 }
             } else if self.config.one_player {
                 self.both_clients_loaded_game(&reference).await;
+            }
+        } else if scene_index == 1 {
+            if let Some(opp) = self.get_other_player(&reference, id) {
+                if opp.player.as_ref().unwrap().scene_index == 1 {
+                    self.room_player_add(&reference).await;
+                    self.send_game_info(&reference, None).await;
+                }
+            } else if self.config.one_player {
+                self.room_player_add(&reference).await;
+                self.send_game_info(&reference, None).await;
             }
         }
     }

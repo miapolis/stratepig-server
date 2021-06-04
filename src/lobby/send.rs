@@ -38,24 +38,28 @@ impl GameServer {
         self.message_room(room, packet).await;
     }
 
-    pub async fn send_game_info(&self, room: &GameRoom, id: usize) {
-        let room = room.inner();
+    pub async fn send_game_info(&self, room: &GameRoom, id: Option<usize>) {
+        let inner = room.inner();
 
         let mut packet = Packet::new_id(ServerMessage::GameInfo as i32);
-        packet.write_str(&room.code);
-        packet.write_i32(room.settings.game_mode as i32);
-        packet.write_u32(room.settings.placement_time);
-        packet.write_u32(room.settings.turn_time);
-        packet.write_u32(room.settings.buffer_time);
+        packet.write_str(&inner.code);
+        packet.write_i32(inner.settings.game_mode as i32);
+        packet.write_u32(inner.settings.placement_time);
+        packet.write_u32(inner.settings.turn_time);
+        packet.write_u32(inner.settings.buffer_time);
 
-        packet.write_u32(room.settings.pig_config.len() as u32);
+        packet.write_u32(inner.settings.pig_config.len() as u32);
 
-        for item in &room.settings.pig_config {
+        for item in &inner.settings.pig_config {
             packet.write_u32(*item.0 as u32);
             packet.write_u32(*item.1 as u32);
         }
 
-        self.message_one(id, packet).await;
+        if let Some(id) = id {
+            self.message_one(id, packet).await;
+        } else {
+            self.message_room(room, packet).await;
+        }
     }
 
     pub async fn err_join_game(&self, id: usize, message: &str) {

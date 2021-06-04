@@ -47,6 +47,14 @@ impl Player {
         self.init_board = setup.clone();
         self.board = setup;
     }
+
+    pub fn reset(&mut self) {
+        self.is_ready = false;
+        self.board = Board::new();
+        self.init_board = Board::new();
+        self.play_again = false;
+        self.current_buffer = 0;
+    }
 }
 
 pub struct RoomPlayer {
@@ -64,5 +72,9 @@ impl RoomPlayer {
             ready: false,
             icon,
         }
+    }
+
+    pub fn reset(&mut self) {
+        self.ready = false;
     }
 }

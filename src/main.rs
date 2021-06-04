@@ -25,6 +25,7 @@ mod packet;
 mod player;
 mod test_util;
 mod util;
+mod version;
 mod win;
 use client::Client;
 use config::Config;
@@ -80,6 +81,7 @@ impl GameServer {
         register!(FinishedSceneLoad, Self::handle_client_finish_scene_load);
         register!(GamePlayerReadyData, Self::handle_game_player_ready);
         register!(Move, Self::move_received);
+        register!(PlayAgain, Self::handle_client_play_again);
     }
 
     async fn start(&mut self) {
@@ -90,7 +92,7 @@ impl GameServer {
             match result {
                 (id, ServerEvent::Connected) => self.handle_connection(id).await,
                 (id, ServerEvent::Disconnected) => self.handle_disconnect(id).await,
-                (_, ServerEvent::IoError(err)) => println!("IO error: {}", err),
+                (_, ServerEvent::IoError(err)) => eprintln!("IO error: {}", err),
                 (id, ServerEvent::Data(data)) => self.handle_data(id, data).await,
                 (_, ServerEvent::Empty) => {}
             }
@@ -102,7 +104,7 @@ impl GameServer {
 
         // Send to the player version info and their ID
         let mut packet = Packet::new_id(ServerMessage::Welcome as i32);
-        packet.write_str("0.6.9");
+        packet.write_str(version::VERSION);
         packet.write_str(&id.to_string());
         self.message_one(id, packet).await;
     }
@@ -123,6 +125,10 @@ impl GameServer {
         if let Some(_) = result {
             let room = result.unwrap();
             let mut client_ids = room.inner().client_ids.clone();
+            if !client_ids.contains(&id) {
+                return;
+            }
+
             let mut write = room.get().write().unwrap();
 
             write
@@ -224,7 +230,6 @@ impl GameServer {
 
         let room = GameRoom::new(id, code);
         game_rooms.insert(id, room);
-        println!("CREATED ROOM WITH ID {}", id);
         Ok(MutexGuard::map(game_rooms, |g| g.get_mut(id).unwrap()))
     }
 

@@ -80,4 +80,10 @@ impl GameServer {
 
         self.message_room(room, packet).await;
     }
+
+    pub async fn client_play_again(&self, room: &GameRoom, id: usize) {
+        let mut packet = Packet::new_id(ServerMessage::ClientPlayAgain as i32);
+        packet.write_str(&id.to_string());
+        self.message_room(room, packet).await;
+    }
 }

@@ -161,4 +161,49 @@ impl GameServer {
 
         self.turn_start(room_id, attack).await;
     }
+
+    pub async fn handle_client_play_again(&mut self, id: usize, mut packet: Packet) {
+        let id_check = packet.read_string().unwrap_or(String::new());
+        if id.to_string() != id_check {
+            return;
+        }
+        let ctx = self.get_context(id);
+        if let None = ctx {
+            return;
+        }
+        let (client, room) = ctx.unwrap();
+        let room_id = room.id();
+
+        if client.player.as_ref().is_none() {
+            return;
+        }
+        if room.inner().game_phase != 2 || !room.inner().game_ended {
+            return;
+        }
+        if client.player.as_ref().unwrap().play_again {
+            return;
+        }
+
+        self.client_play_again(&room, id).await;
+        drop(room);
+        self.get_player_mut(id).unwrap().play_again = true;
+        let room = self.get_room(room_id).unwrap();
+
+        if self
+            .get_other_player(&room, id)
+            .unwrap()
+            .player
+            .as_ref()
+            .unwrap()
+            .play_again
+        {
+            room.reset();
+            let clients = room.clients();
+            drop(room);
+
+            for client_id in clients {
+                self.get_client_mut(client_id).unwrap().reset();
+            }
+        }
+    }
 }
