@@ -20,7 +20,7 @@ pub struct Server {
 impl Server {
     /// Creates a new server
     pub fn new() -> Self {
-        let listener = TcpListener::bind("127.0.0.1:32500").unwrap();
+        let listener = TcpListener::bind("0.0.0.0:32500").unwrap();
         let connections = Arc::new(Mutex::new(VecMap::new()));
         let client_count = Arc::new(atomic::AtomicUsize::new(0));
         let (new_s, new_r) = channel();
