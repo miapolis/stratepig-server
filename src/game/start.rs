@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::convert::TryInto;
 
 use crate::board::{self, Piece, Pig};
+use crate::player::{Player, PlayerRole};
 use crate::util;
 use crate::GameServer;
 use crate::Packet;
@@ -88,7 +89,7 @@ impl GameServer {
             .as_mut()
             .unwrap();
         player.is_ready = true;
-        player.initialize_setup(pig_locations);
+        player.initialize_setup(pig_locations.clone());
         let reference = self.get_room(room_id).unwrap();
         self.game_player_ready_state(&reference, id, true).await;
 
@@ -99,6 +100,14 @@ impl GameServer {
                     self.register_board_data(room_id).await;
                 }
             }
+        } else {
+            let mut fake_enemy = Player::new(PlayerRole::Two);
+            fake_enemy.is_ready = true;
+            fake_enemy.initialize_setup(pig_locations);
+            reference.get().write().unwrap().fake_enemy = Some(fake_enemy);
+
+            drop(reference);
+            self.register_board_data(room_id).await;
         }
     }
 
@@ -106,10 +115,17 @@ impl GameServer {
         let room = self.get_room(room_id).unwrap();
 
         for id in room.inner().client_ids.iter() {
-            let mut locations = Vec::new();
-
+            let locations;
             if self.config.one_player {
-                // TODO: Allow for one player games
+                locations = room
+                    .inner()
+                    .fake_enemy
+                    .as_ref()
+                    .unwrap()
+                    .board
+                    .iter()
+                    .map(|x| x.location)
+                    .collect();
             } else {
                 let opp_board = &self
                     .get_other_player(&room, *id)
@@ -134,7 +150,9 @@ impl GameServer {
             player.current_buffer = buffer as u64;
         }
 
-        self.turn_start(room_id, false).await;
+        if !(self.config.one_player || self.config.ignore_turns) {
+            self.turn_start(room_id, false).await;
+        }
     }
 
     pub async fn turn_start(&mut self, room_id: usize, delay: bool) {

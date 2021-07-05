@@ -7,7 +7,7 @@ use tokio::time;
 
 use crate::board::Pig;
 use crate::client::Client;
-use crate::player::PlayerRole;
+use crate::player::{Player, PlayerRole};
 use crate::util::unix_now;
 use crate::util::unix_timestamp_to;
 use crate::win::WinType;
@@ -26,6 +26,7 @@ pub struct GameRoomInner {
     pub game_phase: u8,
     pub game_ended: bool,
     pub settings: GameRoomSettings,
+    pub fake_enemy: Option<Player>,
     pub last_seen_at: u64,
 
     pub current_turn: PlayerRole,
@@ -49,6 +50,7 @@ impl GameRoom {
             game_phase: 1,
             game_ended: false,
             settings: GameRoomSettings::new(GameMode::Original, 600, 15, 300),
+            fake_enemy: None,
             last_seen_at: unix_now(),
 
             current_turn: PlayerRole::One,
@@ -96,9 +98,13 @@ impl GameRoom {
         panic!("Client options exhausted!");
     }
 
-    pub async fn start(&self, game: &GameServer) {
+    pub fn store_seen(&self) {
+        self.get().write().unwrap().last_seen_at = unix_now();
+    }
+
+    pub async fn start(&self, game: &GameServer, in_secs: u64) {
         let inner = self.get().clone();
-        let duration = Duration::from_secs(5);
+        let duration = Duration::from_secs(in_secs);
         let timestamp = unix_timestamp_to(duration);
 
         let mut packet = Packet::new_id(ServerMessage::RoomTimerUpdate as i32);
@@ -440,7 +446,7 @@ pub fn get_pig_config_for_mode(mode: GameMode) -> Option<HashMap<Pig, u8>> {
 }
 
 pub fn get_settings_vars(mode: GameMode) -> SettingsVars {
-    if mode == GameMode::Original || mode == GameMode::Infiltrator {
+    if mode == GameMode::Duel {
         return SettingsVars {
             buffer_time: 180,
             ..Default::default()

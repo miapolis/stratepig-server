@@ -20,7 +20,7 @@ impl Config {
                 .author(authors)
                 .arg(
                     Arg::with_name("ONE_PLAYER").short("p").help(
-                        "If specified, only one player will be required in lobby and in game",
+                        "If specified, only one player will be required in lobby and in game and turns will be disabled",
                     ),
                 )
                 .arg(Arg::with_name("SWIFT_GAME_ENTER").short("s").help(
@@ -35,7 +35,11 @@ impl Config {
 
         let one_player = args.is_present("ONE_PLAYER");
         let swift_game_enter = args.is_present("SWIFT_GAME_ENTER");
-        let ignore_turns = args.is_present("IGNORE_TURNS");
+        let mut ignore_turns = args.is_present("IGNORE_TURNS");
+
+        if one_player {
+            ignore_turns = true;
+        }
 
         Self {
             one_player,

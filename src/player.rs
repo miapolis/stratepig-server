@@ -1,6 +1,7 @@
 use crate::board::*;
 use crate::client::Client;
 
+#[derive(Debug)]
 pub struct Player {
     pub role: PlayerRole,
     pub scene_index: u8,
@@ -31,7 +32,7 @@ impl PlayerRole {
 
 impl Player {
     /// Constructs a new player instance given a role
-    fn new(role: PlayerRole) -> Self {
+    pub fn new(role: PlayerRole) -> Self {
         Self {
             role,
             scene_index: 1,

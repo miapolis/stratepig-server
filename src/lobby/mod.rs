@@ -175,13 +175,13 @@ impl GameServer {
 
         if ready {
             if self.config.one_player {
-                reference.start(self).await;
+                reference.start(self, 1).await;
             } else {
                 // If there is any better way to do this, please let me know
                 if let Some(res) = self.get_other_player(&reference, id) {
                     if let Some(player) = &res.room_player {
                         if player.ready {
-                            reference.start(self).await;
+                            reference.start(self, 5).await;
                         }
                     }
                 }

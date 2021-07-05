@@ -36,6 +36,7 @@ impl GameServer {
         }
 
         let reference = self.get_room(room_id).unwrap();
+        reference.store_seen();
 
         if scene_index == 2 {
             // Game

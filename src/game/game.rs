@@ -29,7 +29,7 @@ impl GameServer {
         }
 
         let current_turn = room.inner().current_turn;
-        if client.player.as_ref().unwrap().role != current_turn {
+        if !self.config.ignore_turns && client.player.as_ref().unwrap().role != current_turn {
             return;
         }
 
@@ -47,13 +47,19 @@ impl GameServer {
 
         let player = client.player.as_ref().unwrap();
 
-        // unsafe
-        let opp_client = self.get_other_player(&room, id).unwrap();
-        let opp_id = opp_client.id;
-        let opponent = opp_client.player.as_ref().unwrap();
-
         let mut local_board = player.board.clone();
-        let mut opponent_board = board::flip_board(&opponent.board);
+
+        let mut opp_id = 0;
+        let mut opponent_board;
+        if !self.config.one_player {
+            let opp_client = self.get_other_player(&room, id).unwrap();
+            opp_id = opp_client.id;
+            let opponent = opp_client.player.as_ref().unwrap();
+            opponent_board = board::flip_board(&opponent.board);
+        } else {
+            opponent_board = board::flip_board(&room.inner().fake_enemy.as_ref().unwrap().board);
+        }
+
         let total_board = board::sum_boards(&local_board, &opponent_board);
 
         let initiator = unwrap_ret!(local_board.iter().find(|x| x.location == from_location));
@@ -159,7 +165,9 @@ impl GameServer {
         room.get().write().unwrap().current_turn = current_turn.opp();
         drop(room);
 
-        self.turn_start(room_id, attack).await;
+        if !(self.config.one_player || self.config.ignore_turns) {
+            self.turn_start(room_id, attack).await;
+        }
     }
 
     pub async fn handle_client_play_again(&mut self, id: usize, mut packet: Packet) {
@@ -198,6 +206,7 @@ impl GameServer {
             .play_again
         {
             room.reset();
+            room.store_seen();
             let clients = room.clients();
             drop(room);
 

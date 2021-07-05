@@ -319,8 +319,10 @@ impl GameServer {
 
                 let mut to_prune = Vec::new();
                 for (id, room) in game_rooms.lock().iter_mut() {
-                    if now > room.inner().last_seen_at + MAX_PRUNE_AGE_SECS {
-                        to_prune.push(id);
+                    if !room.inner().in_game || room.inner().game_ended {
+                        if now > room.inner().last_seen_at + MAX_PRUNE_AGE_SECS {
+                            to_prune.push(id);
+                        }
                     }
                 }
 
