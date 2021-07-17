@@ -7,6 +7,7 @@ use tokio::time;
 
 use crate::board::Pig;
 use crate::client::Client;
+use crate::packet::{RoomTimerUpdatePacket, TurnInitPacket};
 use crate::player::{Player, PlayerRole};
 use crate::util::unix_now;
 use crate::util::unix_timestamp_to;
@@ -107,8 +108,9 @@ impl GameRoom {
         let duration = Duration::from_secs(in_secs);
         let timestamp = unix_timestamp_to(duration);
 
-        let mut packet = Packet::new_id(ServerMessage::RoomTimerUpdate as i32);
-        packet.write_u64(timestamp);
+        let packet = RoomTimerUpdatePacket {
+            timestamp: timestamp as i64,
+        };
         game.message_room(self, packet).await;
 
         let handle = tokio::task::spawn(async move {
@@ -150,8 +152,7 @@ impl GameRoom {
                 time::sleep(Duration::from_secs(4)).await;
             }
 
-            let mut packet = Packet::new_id(ServerMessage::TurnInit as i32);
-            packet.write_u32(role as u32);
+            let packet = TurnInitPacket { role: role as u32 };
             {
                 // For some weird reason this is required to be in a separate scope
                 message_room!(server, inner, packet);
@@ -161,26 +162,26 @@ impl GameRoom {
                 Duration::from_secs(inner.read().unwrap().settings.turn_time as u64);
             let turn_timestamp = unix_timestamp_to(turn_duration);
 
-            let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
-            packet.write_u32(role as u32);
-            packet.write_u64(turn_timestamp);
-            packet.write_bool(false);
-            {
-                message_room!(server, inner, packet);
-            }
+            // let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
+            // packet.write_u32(role as u32);
+            // packet.write_u64(turn_timestamp);
+            // packet.write_bool(false);
+            // {
+            //     message_room!(server, inner, packet);
+            // }
 
             time::sleep(turn_duration).await;
 
             let buffer_duration = Duration::from_secs(player_buffer as u64);
             let buffer_timestamp = unix_timestamp_to(buffer_duration);
 
-            let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
-            packet.write_u32(role as u32);
-            packet.write_u64(buffer_timestamp);
-            packet.write_bool(true);
-            {
-                message_room!(server, inner, packet);
-            }
+            // let mut packet = Packet::new_id(ServerMessage::TurnSecondUpdate as i32);
+            // packet.write_u32(role as u32);
+            // packet.write_u64(buffer_timestamp);
+            // packet.write_bool(true);
+            // {
+            //     message_room!(server, inner, packet);
+            // }
 
             inner.write().unwrap().last_buffer_timestamp = Some(unix_now());
 
@@ -192,14 +193,14 @@ impl GameRoom {
             let start = read.game_start_timestamp.unwrap_or(unix_now());
             let elapsed = unix_now() - start;
 
-            let mut packet = Packet::new_id(ServerMessage::Win as i32);
-            packet.write_u32(read.current_turn.opp() as u32);
-            packet.write_u32(WinType::OutOfTime as u32);
-            packet.write_u64(elapsed);
-            packet.write_bool(WinType::OutOfTime.immediate());
+            // let mut packet = Packet::new_id(ServerMessage::Win as i32);
+            // packet.write_u32(read.current_turn.opp() as u32);
+            // packet.write_u32(WinType::OutOfTime as u32);
+            // packet.write_u64(elapsed);
+            // packet.write_bool(WinType::OutOfTime.immediate());
             drop(read);
 
-            message_room!(server, inner, packet);
+            // message_room!(server, inner, packet);
         });
         write.game_ticker = Some(handle);
     }

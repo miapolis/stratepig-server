@@ -1,188 +1,278 @@
-use std::collections::VecDeque;
-use std::io::{self, BufRead, BufReader, Write};
-use std::net::{TcpListener, TcpStream};
-use std::ops::Fn;
-use std::sync::atomic::{self, Ordering};
-use std::sync::mpsc::{channel, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
-use std::thread::{self};
+use mio::net::{TcpListener, TcpStream};
+use mio::{Events, Interest, Poll, Token};
+use std::collections::{HashMap, VecDeque};
+use std::io::Read;
+use std::net::SocketAddr;
 
-use vec_map::VecMap;
+use crate::buffer::NetworkBuffer;
+use crate::error::Error;
+use crate::packet::{
+    deserialize_packet_header, serialize_packet, Packet, PacketBody, PACKET_HEADER_SIZE,
+};
+use crate::send_bytes;
+use crate::PacketRecipient;
 
-type ClientConn = (Receiver<io::Result<Vec<u8>>>, TcpStream);
+const LOCAL_TOKEN: Token = Token(0);
+const EVENTS_CAPACITY: usize = 4096;
+
+#[derive(Debug)]
+pub enum ServerEvent {
+    ClientConnected(Token, SocketAddr),
+    ClientDisconnected(Token),
+    ReceivedPacket(Token, usize),
+    SentPacket(Token, usize),
+
+    #[doc(hidden)]
+    __Nonexhaustive,
+}
+
+pub struct Connection {
+    token: Token,
+    socket: TcpStream,
+    disconnected: bool,
+    buffer: NetworkBuffer,
+    outgoing_packets: VecDeque<Box<dyn PacketBody>>,
+}
+
+impl Connection {
+    pub fn new(token: Token, socket: TcpStream) -> Self {
+        Connection {
+            token,
+            socket,
+            disconnected: false,
+            buffer: NetworkBuffer::new(),
+            outgoing_packets: VecDeque::new(),
+        }
+    }
+}
 
 pub struct Server {
-    pub connections: Arc<Mutex<VecMap<ClientConn>>>,
-    pub client_count: Arc<atomic::AtomicUsize>,
-    pub new_r: Receiver<usize>,
+    tcp_listener: TcpListener,
+    events: Events,
+    poll: Poll,
+    ms_sleep_time: u16,
+    connections: HashMap<Token, Connection>,
+    token_counter: usize,
+    incoming_packets: VecDeque<(Token, Packet)>,
 }
 
 impl Server {
-    /// Creates a new server
-    pub fn new() -> Self {
-        let listener = TcpListener::bind("0.0.0.0:32500").unwrap();
-        let connections = Arc::new(Mutex::new(VecMap::new()));
-        let client_count = Arc::new(atomic::AtomicUsize::new(0));
-        let (new_s, new_r) = channel();
-        {
-            let listener = listener.try_clone().unwrap();
-            let connections = connections.clone();
-            let client_count = client_count.clone();
+    pub fn new(ip: &str, port: u16, tickrate: u16) -> Result<Server, Error> {
+        let addr = format!("{}:{}", ip, port).parse().unwrap();
+        let mut tcp_listener = TcpListener::bind(addr)?;
 
-            thread::spawn(move || {
-                let mut id = 0;
-                let free_ids = Arc::new(Mutex::new(VecDeque::new()));
-                for conn in listener.incoming() {
-                    if let Ok(conn) = conn {
-                        let free_ids = free_ids.clone();
-                        let new_id = match free_ids.lock().unwrap().pop_front() {
-                            Some(id) => id,
-                            None => {
-                                id += 1;
-                                id
-                            }
-                        };
+        let poll = Poll::new().unwrap();
+        poll.registry()
+            .register(&mut tcp_listener, LOCAL_TOKEN, Interest::READABLE)?;
 
-                        let connections = connections.clone();
-                        let connections_clone = connections.clone();
-                        let client_count = client_count.clone();
-                        let conn_reader = conn.try_clone().unwrap();
-                        let (ds, dr) = channel();
-                        let new_s = new_s.clone();
+        Ok(Server {
+            tcp_listener,
+            events: Events::with_capacity(EVENTS_CAPACITY),
+            poll,
+            ms_sleep_time: 1000 / tickrate,
+            connections: HashMap::new(),
+            token_counter: 0,
+            incoming_packets: VecDeque::new(),
+        })
+    }
 
-                        thread::spawn(move || {
-                            let mut reader = BufReader::new(conn_reader);
-                            let my_id = new_id;
-                            // Increment the client count by one
-                            client_count
-                                .store(client_count.load(Ordering::Relaxed) + 1, Ordering::Relaxed);
-                            // Send to the channel that a client has connected
-                            new_s.send(my_id).unwrap();
+    pub fn num_connections(&self) -> usize {
+        self.connections.len()
+    }
 
-                            loop {
-                                let result = match reader.fill_buf() {
-                                    Ok(data) if data.len() == 0 => Some(0),
-                                    Ok(data) => {
-                                        ds.send(Ok(data.to_vec())).unwrap();
-                                        Some(data.len())
-                                    }
-                                    Err(e) => {
-                                        ds.send(Err(e)).unwrap();
-                                        None
-                                    }
-                                };
+    pub fn drain_incoming_packets(&mut self) -> Vec<(Token, Packet)> {
+        self.incoming_packets.drain(..).collect()
+    }
 
-                                if let Some(read) = result {
-                                    if read > 0 {
-                                        reader.consume(read);
+    pub fn kick(&mut self, connection_token: Token) -> Result<(), Error> {
+        let conn: &mut Connection = match self.connections.get_mut(&connection_token) {
+            Some(c) => c,
+            None => return Err(Error::ConnectionNotFound),
+        };
+
+        conn.disconnected = true;
+
+        Ok(())
+    }
+
+    pub fn send(&mut self, recipient: PacketRecipient, packet: impl PacketBody) {
+        let boxed: Box<dyn PacketBody> = Box::new(packet);
+        self.send_boxed(recipient, boxed);
+    }
+
+    pub fn send_boxed(&mut self, recipient: PacketRecipient, packet_boxed: Box<dyn PacketBody>) {
+        match recipient {
+            PacketRecipient::All => {
+                for (_, connection) in self.connections.iter_mut() {
+                    connection.outgoing_packets.push_back(packet_boxed.clone());
+                }
+            }
+            PacketRecipient::Single(t) => {
+                if let Some(connection) = self.connections.get_mut(&t) {
+                    connection.outgoing_packets.push_back(packet_boxed);
+                }
+            }
+            PacketRecipient::Exclude(t) => {
+                let filtered = self.connections.iter_mut().filter(|(tok, _c)| tok.0 != t.0);
+                for (_token, connection) in filtered {
+                    connection.outgoing_packets.push_back(packet_boxed.clone());
+                }
+            }
+            PacketRecipient::ExcludeMany(filter) => {
+                let filtered = self
+                    .connections
+                    .iter_mut()
+                    .filter(|(tok, _c)| !filter.contains(tok));
+                for (_token, connection) in filtered {
+                    connection.outgoing_packets.push_back(packet_boxed.clone());
+                }
+            }
+            PacketRecipient::Include(targets) => {
+                let filtered = self
+                    .connections
+                    .iter_mut()
+                    .filter(|(tok, _c)| targets.contains(tok));
+                for (_token, connection) in filtered {
+                    connection.outgoing_packets.push_back(packet_boxed.clone());
+                }
+            }
+        }
+    }
+
+    pub fn tick(&mut self) -> Vec<ServerEvent> {
+        std::thread::sleep(std::time::Duration::from_millis(self.ms_sleep_time as u64));
+        let timeout = std::time::Duration::from_millis(1);
+        self.poll
+            .poll(&mut self.events, Some(timeout))
+            .unwrap_or_else(|e| panic!("Failed to poll for new events! {}", e));
+
+        let mut net_events: Vec<ServerEvent> = Vec::new();
+        for event in self.events.iter() {
+            match event.token() {
+                LOCAL_TOKEN => loop {
+                    match self.tcp_listener.accept() {
+                        Ok((mut socket, addr)) => {
+                            println!("Accepting connection...");
+
+                            self.token_counter += 1;
+                            let token = Token(self.token_counter);
+
+                            self.poll.registry().register(
+                            &mut socket,
+                            token,
+                            Interest::READABLE.add(Interest::WRITABLE)
+                        ).unwrap_or_else(|e| panic!("Failed to register poll for new connection (Token {}, Address {}). {}", token.0, addr, e));
+
+                            self.connections
+                                .insert(token, Connection::new(token, socket));
+
+                            net_events.push(ServerEvent::ClientConnected(token, addr));
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            break;
+                        }
+                        Err(e) => println!("{}", e),
+                    }
+                },
+                token => {
+                    let conn: &mut Connection =
+                        self.connections.get_mut(&token).unwrap_or_else(|| {
+                            panic!(
+                                "Attempted to handle socket event for non-existent connection {}!",
+                                token.0
+                            )
+                        });
+
+                    if event.is_readable() {
+                        let buffer = &mut conn.buffer.data[conn.buffer.offset..];
+                        loop {
+                            match conn.socket.read(buffer) {
+                                Ok(0) => {
+                                    conn.disconnected = true;
+                                    break;
+                                }
+                                Ok(read_bytes) => {
+                                    conn.buffer.offset += read_bytes;
+                                }
+                                Err(e) => {
+                                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                                        break;
                                     } else {
-                                        drop(ds);
-                                        free_ids.lock().unwrap().push_back(my_id);
+                                        eprintln!("Unexpected error when reading bytes from connection {}! {}", conn.token.0, e);
+                                        conn.disconnected = true;
                                         break;
                                     }
                                 }
                             }
+                        }
 
-                            client_count
-                                .store(client_count.load(Ordering::Relaxed) - 1, Ordering::Relaxed);
-                            connections.lock().unwrap().remove(my_id);
-                        });
+                        while let Ok(header) = deserialize_packet_header(&mut conn.buffer) {
+                            let packet_size = PACKET_HEADER_SIZE + (header.size as usize);
+                            if conn.buffer.offset < packet_size {
+                                break;
+                            }
 
-                        connections_clone.lock().unwrap().insert(new_id, (dr, conn));
+                            let bytes: &[u8] = &conn.buffer.data[PACKET_HEADER_SIZE..packet_size];
+                            let body = bytes.to_vec();
+                            conn.buffer.drain(packet_size);
+
+                            let packet = Packet { header, body };
+
+                            self.incoming_packets.push_back((token, packet));
+
+                            net_events.push(ServerEvent::ReceivedPacket(conn.token, packet_size));
+                        }
                     }
+
+                    if event.is_writable() {
+                        while let Some(packet) = conn.outgoing_packets.pop_front() {
+                            let data = match serialize_packet(packet) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    eprintln!("Failed to serialize packet! {}", e);
+                                    continue;
+                                }
+                            };
+
+                            match send_bytes(&mut conn.socket, &data) {
+                                Ok(sent_bytes) => {
+                                    net_events.push(ServerEvent::SentPacket(token, sent_bytes));
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "Unexpected error when sending bytes to connection {}! {}",
+                                        conn.token.0, e
+                                    );
+                                    conn.disconnected = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    self.poll
+                        .registry()
+                        .reregister(
+                            &mut conn.socket,
+                            conn.token,
+                            Interest::READABLE.add(Interest::WRITABLE),
+                        )
+                        .unwrap_or_else(|e| {
+                            panic!(
+                                "Failed to reregister poll for connection (Token {}). {}",
+                                token.0, e
+                            )
+                        });
                 }
-            });
-        }
-
-        Self {
-            connections,
-            client_count,
-            new_r,
-        }
-    }
-
-    /// Send a message to all connected clients
-    pub fn message_all(&self, data: &[u8]) {
-        self.message(|_| true, data)
-    }
-
-    /// Send a message to a single client
-    pub fn message_one(&self, client: usize, data: &[u8]) {
-        self.message(|id| id == client, data)
-    }
-
-    /// Send a message to every client but one
-    pub fn message_except(&self, client: usize, data: &[u8]) {
-        self.message(|id| id != client, data)
-    }
-
-    // Custom message based on a predicate
-    pub fn message<P>(&self, predicate: P, data: &[u8])
-    where
-        P: Fn(usize) -> bool,
-    {
-        for (_, &mut (_, ref mut conn)) in self
-            .connections
-            .lock()
-            .unwrap()
-            .iter_mut()
-            .filter(|&(id, _)| predicate(id))
-        {
-            conn.write_all(data).unwrap();
-        }
-    }
-
-    pub fn scan(&mut self) -> (usize, ServerEvent) {
-        loop {
-            match self.new_r.try_recv() {
-                Ok(id) => return (id, ServerEvent::Connected),
-                Err(e) if e == TryRecvError::Empty => break,
-                Err(e) if e == TryRecvError::Disconnected => {
-                    panic!("Tried to check for new clients on disconnected channel!");
-                }
-                Err(_) => unimplemented!(),
             }
         }
 
-        let mut results = Vec::with_capacity(self.connections.lock().unwrap().len());
-
-        for (id, &mut (ref mut dr, _)) in self.connections.lock().unwrap().iter_mut() {
-            match dr.try_recv() {
-                Ok(Ok(data)) => results.push((id, ServerEvent::Data(data))),
-                Ok(Err(err)) => results.push((id, ServerEvent::IoError(err))),
-                Err(TryRecvError::Empty) => {} // Do nothing
-                Err(TryRecvError::Disconnected) => results.push((id, ServerEvent::Disconnected)),
-            }
+        for (tok, _) in self.connections.iter().filter(|&(_, c)| c.disconnected) {
+            net_events.push(ServerEvent::ClientDisconnected(*tok));
         }
 
-        for (id, result) in results.into_iter() {
-            if let ServerEvent::Disconnected = result {
-                self.connections.lock().unwrap().remove(id);
-            }
-            return (id, result);
-        }
+        self.connections.retain(|_, v| !v.disconnected);
 
-        (0, ServerEvent::Empty)
+        net_events
     }
-
-    pub fn disconnect_client(&mut self, id: usize) {
-        self.client_count.store(
-            self.client_count.load(Ordering::Relaxed) - 1,
-            Ordering::Relaxed,
-        );
-        self.connections.lock().unwrap().remove(id);
-    }
-}
-
-pub enum ServerEvent {
-    /// The client sent data
-    Data(Vec<u8>),
-    /// An IO error occurred while scanning
-    IoError(io::Error),
-    /// A new client has connected
-    Connected,
-    /// A client has disconnected
-    Disconnected,
-    /// Nothing occured
-    Empty,
 }

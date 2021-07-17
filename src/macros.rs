@@ -1,14 +1,19 @@
 #[macro_export]
 macro_rules! message_room {
-    ($server:expr, $room:expr, $packet:expr) => {
-        let lock = $server.lock();
+    ($server:expr, $room:expr, $packet:expr) => {{
+        use crate::PacketRecipient;
+        use crate::Token;
 
-        $packet.write_length();
-        let bytes = $packet.to_array();
-
-        for id in $room.read().unwrap().client_ids.iter() {
-            lock.message_one(*id, bytes);
-        }
-        drop(lock);
-    };
+        let tokens: Vec<Token> = $room
+            .read()
+            .unwrap()
+            .client_ids
+            .clone()
+            .into_iter()
+            .map(|x| Token(x))
+            .collect();
+        $server
+            .lock()
+            .send(PacketRecipient::Include(tokens), $packet);
+    }};
 }

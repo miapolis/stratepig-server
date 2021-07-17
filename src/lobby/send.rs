@@ -3,13 +3,12 @@ use std::collections::HashMap;
 
 impl GameServer {
     pub async fn fail_create_game(&self, id: usize) {
-        let packet = Packet::new_id(ServerMessage::FailCreateGame as i32);
+        let packet = FailCreateGamePacket {};
         self.message_one(id, packet).await;
     }
 
     pub async fn initialize_player(&self, id: usize, role: PlayerRole) {
-        let mut packet = Packet::new_id(ServerMessage::ClientInfo as i32);
-        packet.write_u32(role as u32);
+        let packet = ClientInfoPacket { role: role as u32 };
         self.message_one(id, packet).await;
     }
 
@@ -18,42 +17,45 @@ impl GameServer {
 
         for id in read.client_ids.iter() {
             let client = self.all_clients.get(*id).unwrap();
-            let mut packet = Packet::new_id(ServerMessage::RoomPlayerAdd as i32);
-            packet.write_str(&client.id.to_string());
-            packet.write_i32(read.client_ids.len() as i32);
-
             let room_player = client.room_player.as_ref().unwrap();
-            packet.write_str(&room_player.username);
-            packet.write_bool(room_player.ready);
-            packet.write_i32(room_player.icon as i32);
+
+            let packet = RoomPlayerAddPacket {
+                id: client.id.to_string(),
+                client_count: read.client_ids.len() as i32,
+                username: room_player.username.clone(),
+                ready: room_player.ready,
+                icon: room_player.icon as i32,
+            };
 
             self.message_room(room, packet).await;
         }
     }
 
     pub async fn client_disconnected(&self, room: &GameRoom, id: usize) {
-        let mut packet = Packet::new_id(ServerMessage::ClientDisconnect as i32);
-        packet.write_str(&id.to_string());
-        packet.write_u64(0); // TODO: actually calculate elapsed unix timestamp
-        self.message_room(room, packet).await;
+        // let mut packet = Packet::new_id(ServerMessage::ClientDisconnect as i32);
+        // packet.write_str(&id.to_string());
+        // packet.write_u64(0); // TODO: actually calculate elapsed unix timestamp
+        // self.message_room(room, packet).await;
     }
 
     pub async fn send_game_info(&self, room: &GameRoom, id: Option<usize>) {
         let inner = room.inner();
 
-        let mut packet = Packet::new_id(ServerMessage::GameInfo as i32);
-        packet.write_str(&inner.code);
-        packet.write_i32(inner.settings.game_mode as i32);
-        packet.write_u32(inner.settings.placement_time);
-        packet.write_u32(inner.settings.turn_time);
-        packet.write_u32(inner.settings.buffer_time);
-
-        packet.write_u32(inner.settings.pig_config.len() as u32);
-
-        for item in &inner.settings.pig_config {
-            packet.write_u32(*item.0 as u32);
-            packet.write_u32(*item.1 as u32);
-        }
+        let packet = GameInfoPacket {
+            code: inner.code.clone(),
+            game_mode: inner.settings.game_mode as i32,
+            placement_time: inner.settings.placement_time,
+            turn_time: inner.settings.turn_time,
+            buffer_time: inner.settings.buffer_time,
+            pig_config: inner
+                .settings
+                .pig_config
+                .iter()
+                .map(|(key, value)| {
+                    return ((*key as u32, *value as u32));
+                })
+                .collect(),
+        };
 
         if let Some(id) = id {
             self.message_one(id, packet).await;
@@ -63,52 +65,55 @@ impl GameServer {
     }
 
     pub async fn err_join_game(&self, id: usize, message: &str) {
-        let mut packet = Packet::new_id(ServerMessage::ErrorJoinGame as i32);
-        packet.write_str(message);
+        let packet = ErrJoinGamePacket {
+            msg: message.to_owned(),
+        };
         self.message_one(id, packet).await;
     }
 
     pub async fn room_update_ready_state(&self, room: &GameRoom, id: usize, ready: bool) {
-        let mut packet = Packet::new_id(ServerMessage::RoomPlayerUpdatedReadyState as i32);
-        packet.write_str(&id.to_string());
-        packet.write_bool(ready);
+        let packet = RoomPlayerUpdatedReadyStatePacket {
+            id: id.to_string(),
+            ready,
+        };
 
         self.message_room(room, packet).await;
     }
 
     pub async fn update_room_timer(&self, room: &GameRoom, seconds: i32) {
-        let mut packet = Packet::new_id(ServerMessage::RoomTimerUpdate as i32);
-        packet.write_i32(seconds);
+        let packet = RoomTimerUpdatePacket {
+            timestamp: seconds as i64,
+        };
         self.message_room(room, packet).await;
     }
 
     pub async fn update_icon(&self, room: &GameRoom, id: usize, icon: u32) {
-        let mut packet = Packet::new_id(ServerMessage::UpdatedPigIcon as i32);
-        packet.write_str(&id.to_string());
-        packet.write_u32(icon);
+        let packet = UpdatedPigIconPacket {
+            id: id.to_string(),
+            icon: icon as i32,
+        };
+
         self.message_room(room, packet).await;
     }
 
     pub async fn update_settings_value(&self, room: &GameRoom, id: u32, value: u32) {
-        let mut packet = Packet::new_id(ServerMessage::SettingsValueChanged as i32);
-        packet.write_u32(id);
-        packet.write_u32(value);
+        let packet = SettingsValueChangedPacket { id, value };
         self.message_room(room, packet).await;
     }
 
     pub async fn update_config_bulk(&self, room: &GameRoom, config: HashMap<board::Pig, u8>) {
         let read = room.inner();
 
-        let mut packet = Packet::new_id(ServerMessage::PigConfigValueChanged as i32);
-        packet.write_u32(read.settings.turn_time);
-        packet.write_u32(read.settings.buffer_time);
-
-        packet.write_u32(config.keys().len() as u32);
-
-        for (key, value) in config {
-            packet.write_u32(key as u32);
-            packet.write_u32(value as u32);
-        }
+        let packet = PigConfigValueChangedPacket {
+            turn_time: read.settings.turn_time,
+            buffer_time: read.settings.buffer_time,
+            pig_config: config
+                .iter()
+                .map(|(key, value)| {
+                    return ((*key as u32, *value as u32));
+                })
+                .collect(),
+        };
 
         self.message_room(room, packet).await;
     }

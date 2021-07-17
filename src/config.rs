@@ -7,6 +7,7 @@ pub struct Config {
     pub one_player: bool,
     pub swift_game_enter: bool,
     pub ignore_turns: bool,
+    pub log_packet_errors: bool,
 }
 
 impl Config {
@@ -31,11 +32,17 @@ impl Config {
                         .short("t")
                         .help("If specified, turns will not be used in game"),
                 )
+                .arg(
+                    Arg::with_name("LOG_PACKET_ERRORS")
+                    .short("e")
+                    .help("If specified, packets that return an error will be logged")
+                )
                 .get_matches();
 
         let one_player = args.is_present("ONE_PLAYER");
         let swift_game_enter = args.is_present("SWIFT_GAME_ENTER");
         let mut ignore_turns = args.is_present("IGNORE_TURNS");
+        let log_packet_errors = args.is_present("LOG_PACKET_ERRORS");
 
         if one_player {
             ignore_turns = true;
@@ -45,6 +52,7 @@ impl Config {
             one_player,
             swift_game_enter,
             ignore_turns,
+            log_packet_errors,
         }
     }
 
@@ -60,6 +68,7 @@ impl Config {
         info!("| ONE_PLAYER: {}", self.one_player);
         info!("| SWIFT_GAME_ENTER: {}", self.swift_game_enter);
         info!("| IGNORE_TURNS: {}", self.ignore_turns);
+        info!("| LOG_PACKET_ERRORS: {}", self.log_packet_errors);
     }
 }
 
@@ -69,6 +78,7 @@ impl default::Default for Config {
             one_player: false,
             swift_game_enter: false,
             ignore_turns: false,
+            log_packet_errors: false,
         }
     }
 }

@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, trace};
 use parking_lot::{Mutex, MutexGuard};
 use std::collections::VecDeque;
 use std::future::Future;
@@ -10,12 +10,15 @@ use std::time;
 use vec_map::VecMap;
 
 use stratepig_core::server::{Server, ServerEvent};
-use stratepig_core::Packet;
+use stratepig_core::Token;
+use stratepig_core::{Packet, PacketBody, PacketRecipient};
+use stratepig_derive;
 
 mod board;
 mod client;
 mod config;
 mod constants;
+mod error;
 mod game;
 mod gameroom;
 mod lobby;
@@ -29,11 +32,16 @@ mod version;
 mod win;
 use client::Client;
 use config::Config;
+use error::StratepigError;
 use gameroom::{GameRoom, GameRoomError};
-use packet::{ClientMessage::*, ServerMessage};
+use packet::{ClientMessage::*, *};
 use player::{Player, PlayerRole};
 
-type PacketHandler = fn(&mut GameServer, usize, Packet) -> Pin<Box<dyn Future<Output = ()> + '_>>;
+type PacketHandler = fn(
+    &mut GameServer,
+    usize,
+    Packet,
+) -> Pin<Box<dyn Future<Output = Result<(), StratepigError>> + '_>>;
 
 pub struct GameServer {
     server: Arc<Mutex<Server>>,
@@ -51,17 +59,19 @@ const PRUNE_INTERVAL_SECS: u64 = 180;
 const MAX_PRUNE_AGE_SECS: u64 = 300;
 
 impl GameServer {
-    fn new(config: Config) -> Self {
-        Self {
+    fn new(config: Config) -> Result<Self, stratepig_core::Error> {
+        let server = Server::new("0.0.0.0", 32500, 30)?;
+
+        Ok(Self {
             config,
-            server: Arc::new(Mutex::new(Server::new())),
+            server: Arc::new(Mutex::new(server)),
             packet_handlers: VecMap::new(),
             all_clients: VecMap::new(),
             game_rooms: Arc::new(Mutex::new(VecMap::new())),
             next_game_room_id: Arc::new(Mutex::new(0)),
             free_game_room_ids: Arc::new(Mutex::new(VecDeque::new())),
             game_room_codes: Arc::new(Mutex::new(Vec::new())),
-        }
+        })
     }
 
     fn register_packet_handlers(&mut self) {
@@ -88,13 +98,22 @@ impl GameServer {
         self.run_prune_cycle();
         // Core loop
         loop {
-            let result = self.server.lock().scan();
-            match result {
-                (id, ServerEvent::Connected) => self.handle_connection(id).await,
-                (id, ServerEvent::Disconnected) => self.handle_disconnect(id).await,
-                (_, ServerEvent::IoError(err)) => eprintln!("IO error: {}", err),
-                (id, ServerEvent::Data(data)) => self.handle_data(id, data).await,
-                (_, ServerEvent::Empty) => {}
+            let events;
+            {
+                events = self.server.lock().tick();
+            }
+            for event in events.iter() {
+                match event {
+                    ServerEvent::ClientConnected(tok, _addr) => self.handle_connection(tok.0).await,
+                    ServerEvent::ClientDisconnected(tok) => self.handle_disconnect(tok.0).await,
+                    _ => {}
+                }
+            }
+
+            let packet_groups = self.server.lock().drain_incoming_packets();
+            let packet_handlers = self.packet_handlers.clone();
+            for (token, packet) in packet_groups.into_iter() {
+                self.handle_data(token, packet, &packet_handlers).await;
             }
         }
     }
@@ -102,10 +121,10 @@ impl GameServer {
     async fn handle_connection(&mut self, id: usize) {
         self.all_clients.insert(id, Client::new(id));
 
-        // Send to the player version info and their ID
-        let mut packet = Packet::new_id(ServerMessage::Welcome as i32);
-        packet.write_str(version::VERSION);
-        packet.write_str(&id.to_string());
+        let packet = WelcomePacket {
+            version: version::VERSION.to_owned(),
+            my_id: id.to_string(),
+        };
         self.message_one(id, packet).await;
     }
 
@@ -166,45 +185,38 @@ impl GameServer {
         }
     }
 
-    async fn handle_data(&mut self, id: usize, data: Vec<u8>) {
-        let mut packet = Packet::new_from_bytes(data);
-        let mut packet_length = 0;
-
-        if packet.unread_len() >= 4 {
-            packet_length = packet.read_i32().unwrap_or(0);
-            if packet_length <= 0 {
-                return;
-            }
-        }
-
-        let packet_bytes = packet
-            .read_u8s(packet_length as usize)
-            .unwrap_or(&[])
-            .to_vec();
-        let packet_handlers = self.packet_handlers.clone();
-        let mut new_packet = Packet::new_from_bytes(packet_bytes);
-        match new_packet.read_i32() {
-            Ok(pid) => {
-                if let Some(func) = packet_handlers.get(pid as usize) {
-                    func(self, id, new_packet).await;
+    async fn handle_data(
+        &mut self,
+        token: Token,
+        packet: Packet,
+        handlers: &VecMap<PacketHandler>,
+    ) {
+        if let Some(func) = handlers.get(packet.header.id as usize) {
+            {
+                let res = func(self, token.0, packet.clone()).await;
+                if self.config.log_packet_errors {
+                    info!(
+                        "Client {}: {:?} ==> {:?}",
+                        token.0,
+                        ClientMessage::from(packet.header.id),
+                        res
+                    );
                 }
             }
-            Err(_) => (),
         }
     }
 
-    pub async fn message_one(&self, id: usize, mut packet: Packet) {
-        packet.write_length();
-        self.server.lock().message_one(id, packet.to_array());
+    pub async fn message_one(&self, id: usize, packet: impl PacketBody) {
+        self.server
+            .lock()
+            .send(PacketRecipient::Single(Token(id)), packet);
     }
 
-    pub async fn message_room(&self, room: &GameRoom, mut packet: Packet) {
-        packet.write_length();
-        let bytes = packet.to_array();
-        let server = self.server.lock();
-        for id in room.clients().iter() {
-            server.message_one(*id, bytes);
-        }
+    pub async fn message_room(&self, room: &GameRoom, packet: impl PacketBody) {
+        let tokens: Vec<Token> = room.clients().into_iter().map(|x| Token(x)).collect();
+        self.server
+            .lock()
+            .send(PacketRecipient::Include(tokens), packet);
     }
 
     pub fn new_room(&mut self) -> Result<impl Deref<Target = GameRoom> + '_, &str> {
@@ -228,8 +240,9 @@ impl GameServer {
             code = util::gen_game_room_code();
         }
 
-        let room = GameRoom::new(id, code);
+        let room = GameRoom::new(id, code.clone());
         game_rooms.insert(id, room);
+        trace!("New room '{}' created with ID {}", code, id);
         Ok(MutexGuard::map(game_rooms, |g| g.get_mut(id).unwrap()))
     }
 
@@ -333,14 +346,12 @@ impl GameServer {
                     let room = game_rooms.remove(room_id).unwrap();
                     free_game_room_ids.lock().push_back(room_id);
 
-                    let server = server.lock();
+                    let packet = KickedPacket {
+                        msg: "Room closed due to inactivity.".to_owned(),
+                    };
+                    let tokens: Vec<Token> = room.clients().into_iter().map(|x| Token(x)).collect();
+                    server.lock().send(PacketRecipient::Include(tokens), packet);
 
-                    for id in room.inner().client_ids.iter() {
-                        let mut packet = Packet::new_id(ServerMessage::Kicked as i32);
-                        packet.write_str("Room closed due to inactivity.");
-                        packet.write_length();
-                        server.message_one(*id, packet.to_array());
-                    }
                     drop(room);
                     pruned += 1;
                 }
@@ -358,7 +369,10 @@ async fn main() {
 
     let config = Config::new();
     config.log();
-    let mut server = GameServer::new(config);
+    let mut server = GameServer::new(config).unwrap_or_else(|e| {
+        eprintln!("Error creating server: {}", e);
+        std::process::exit(2);
+    });
 
     server.register_packet_handlers();
     server.start().await;

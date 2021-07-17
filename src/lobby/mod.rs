@@ -1,60 +1,67 @@
-use stratepig_core::Packet;
+use std::convert::TryFrom;
+use stratepig_core::{Packet, PacketBody};
 
 use crate::constants;
 use crate::gameroom;
 use crate::gameroom::{GameMode, GameRoomError};
+use crate::packet::{
+    GameRequestDefaultPacket, GameRequestFullPacket, LeaveGamePacket, RoomTimerUpdatePacket,
+    UpdatePigIconPacket, UpdateReadyStatePacket, UpdateSettingsValue,
+};
 use crate::player::{PlayerRole, RoomPlayer};
 use crate::GameServer;
+use crate::StratepigError;
 mod send;
 mod settings;
 
 impl GameServer {
-    pub async fn handle_game_request(&mut self, id: usize, mut packet: Packet) {
+    pub async fn handle_game_request(
+        &mut self,
+        id: usize,
+        mut packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = GameRequestDefaultPacket::deserialize(&packet.body)?;
         // Macros are better for this than async closures
         macro_rules! reject {
             () => {
                 self.fail_create_game(id).await;
-                return;
+                return Err(StratepigError::with("failed to create game"));
             };
         }
 
-        let id_check = packet.read_string().unwrap_or(String::new());
-        let hosting = packet.read_bool().unwrap_or(false);
-        let username = packet.read_string().unwrap_or(String::new());
-        let icon = packet.read_i32().unwrap_or(0);
-        let code = packet.read_string();
-        let data_null = packet.read_bool().unwrap_or(false); // If packet specifies preferences in settings
-
-        if id.to_string() != id_check {
-            self.fail_create_game(id).await;
-            return;
+        if data.my_id != id.to_string() {
+            return Err(StratepigError::AssumeWrongId);
         }
-
-        if username == "" || username.len() > constants::MAX_USERNAME_LENGTH as usize {
+        if data.username.trim() == "".to_owned()
+            || data.username.len() > constants::MAX_USERNAME_LENGTH as usize
+        {
             reject!();
         }
-        if icon < 0 || icon >= 13 {
+        if data.icon < 0 || data.icon >= 13 {
             reject!();
         }
 
-        if hosting {
-            let room = self.create_room_from_data(data_null, &mut packet).await;
+        if data.is_hosting {
+            let room = self
+                .create_room_from_data(data.data_null, &mut packet)
+                .await;
+
             if let Err(err) = room {
                 let err = String::from(err);
                 drop(room); // We need to drop the room first before we immutably borrow self
-
                 if let "" = &err[..] {
                     reject!();
                 } else {
                     self.err_join_game(id, &err).await;
-                    return;
+                    return Err(StratepigError::with("failed to create game"));
                 }
             }
+
             let room = room.unwrap();
             let room_id = room.id();
             let mut write = room.get().write().unwrap();
-
             write.client_ids.push(id);
+
             drop(write);
             drop(room);
 
@@ -62,8 +69,8 @@ impl GameServer {
             client.set_game_room(room_id);
             client.room_player = Some(RoomPlayer::new(
                 PlayerRole::One,
-                username,
-                icon as u8,
+                data.username,
+                data.icon as u8,
                 client,
             ));
 
@@ -73,8 +80,7 @@ impl GameServer {
             self.room_player_add(&reference).await;
             self.send_game_info(&reference, Some(id)).await;
         } else {
-            let code = code.unwrap_or(String::new());
-            let room_join = self.try_join_room(&code);
+            let room_join = self.try_join_room(&data.code);
             match room_join {
                 Err(err) => {
                     match err {
@@ -88,23 +94,23 @@ impl GameServer {
                         }
                         GameRoomError::Full => self.err_join_game(id, "That game is full.").await,
                     }
-                    return;
+                    return Ok(());
                 }
                 Ok(_) => {
                     let found = room_join.unwrap();
                     let read = found.inner();
                     let room_id = read.id;
-                    let safe_username = self.generate_safe_username(&found, &username);
+                    let safe_username = self.generate_safe_username(&found, &data.username);
 
                     drop(read);
                     drop(found);
-                    let client = self.all_clients.get_mut(id).unwrap();
 
+                    let client = self.all_clients.get_mut(id).unwrap();
                     client.set_game_room(room_id);
                     client.room_player = Some(RoomPlayer::new(
                         PlayerRole::Two,
                         safe_username,
-                        icon as u8,
+                        data.icon as u8,
                         client,
                     ));
 
@@ -124,41 +130,53 @@ impl GameServer {
                 }
             }
         }
+
+        Ok(())
     }
 
-    pub async fn handle_client_leave(&mut self, id: usize, mut packet: Packet) {
-        let id_check = packet.read_string().unwrap_or(String::new());
+    pub async fn handle_client_leave(
+        &mut self,
+        id: usize,
+        mut packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = LeaveGamePacket::deserialize(&packet.body)?;
 
-        if id.to_string() != id_check {
-            return;
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
         }
+
         let ctx = self.get_context(id);
         if let None = ctx {
-            return;
+            return Err(StratepigError::MissingContext);
         }
         let (_client, room) = ctx.unwrap();
         let room_id = room.id();
         drop(room);
 
         self.handle_client_disconnect(room_id, id).await;
+        Ok(())
     }
 
-    pub async fn handle_ready_state_change(&mut self, id: usize, mut packet: Packet) {
-        let id_check = packet.read_string().unwrap_or(String::new());
-        let ready = packet.read_bool().unwrap_or(false);
+    pub async fn handle_ready_state_change(
+        &mut self,
+        id: usize,
+        mut packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = UpdateReadyStatePacket::deserialize(&packet.body)?;
 
-        if id.to_string() != id_check {
-            return;
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
         }
+
         let ctx = self.get_context(id);
         if let None = ctx {
-            return;
+            return Err(StratepigError::MissingContext);
         }
         let (_client, room) = ctx.unwrap();
         let room_id = room.id();
 
         if room.inner().in_game {
-            return;
+            return Err(StratepigError::with("cannot update ready state in game"));
         }
 
         drop(room);
@@ -169,11 +187,12 @@ impl GameServer {
             .room_player
             .as_mut()
             .unwrap()
-            .ready = ready;
+            .ready = data.ready;
         let reference = self.get_room(room_id).unwrap();
-        self.room_update_ready_state(&reference, id, ready).await;
+        self.room_update_ready_state(&reference, id, data.ready)
+            .await;
 
-        if ready {
+        if data.ready {
             if self.config.one_player {
                 reference.start(self, 1).await;
             } else {
@@ -189,27 +208,35 @@ impl GameServer {
         } else {
             reference.cancel_start();
 
-            let mut packet = Packet::new_id(crate::ServerMessage::RoomTimerUpdate as i32);
-            packet.write_i64(-1);
+            let packet = RoomTimerUpdatePacket { timestamp: -1 };
             self.message_room(&reference, packet).await;
         }
+
+        Ok(())
     }
 
-    pub async fn handle_update_icon(&mut self, id: usize, mut packet: Packet) {
-        let id_check = packet.read_string().unwrap_or(String::new());
-        let icon = packet.read_u32().unwrap_or(0);
+    pub async fn handle_update_icon(
+        &mut self,
+        id: usize,
+        mut packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = UpdatePigIconPacket::deserialize(&packet.body)?;
 
-        if id.to_string() != id_check {
-            return;
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
         }
 
         let ctx = self.get_context(id);
         if let None = ctx {
-            return;
+            return Err(StratepigError::MissingContext);
         }
         let (_client, room) = ctx.unwrap();
         let room_id = room.id();
         drop(room);
+
+        if data.icon > 12 {
+            return Err(StratepigError::with("icon out-of-bounds"));
+        }
 
         self.all_clients
             .get_mut(id)
@@ -217,38 +244,38 @@ impl GameServer {
             .room_player
             .as_mut()
             .unwrap()
-            .icon = icon as u8;
+            .icon = data.icon as u8;
         let reference = self.get_room(room_id).unwrap();
 
-        if icon > 12 {
-            return;
-        }
+        self.update_icon(&reference, id, data.icon).await;
 
-        self.update_icon(&reference, id, icon).await;
+        Ok(())
     }
 
-    pub async fn handle_settings_value_update(&mut self, id: usize, mut packet: Packet) {
-        let id_check = packet.read_string().unwrap_or(String::new());
-        let settings_id = packet.read_u32().unwrap_or(0);
-        let increased = packet.read_bool().unwrap_or(true);
+    pub async fn handle_settings_value_update(
+        &mut self,
+        id: usize,
+        mut packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = UpdateSettingsValue::deserialize(&packet.body)?;
 
-        if id.to_string() != id_check {
-            return;
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
         }
 
         let ctx = self.get_context(id);
         if let None = ctx {
-            return;
+            return Err(StratepigError::MissingContext);
         }
         let (client, room) = ctx.unwrap();
         let room_id = room.id();
 
         if client.player.as_ref().unwrap().role == PlayerRole::One {
-            let key = &(settings_id as u8);
+            let key = &(u8::try_from(data.settings_id).unwrap_or(0));
 
-            if settings_id <= 0 {
+            if data.settings_id <= 0 {
                 let mut current_value = room.inner().settings.game_mode as u8;
-                if increased {
+                if data.increased {
                     current_value += 1;
                     if current_value > GameMode::MAX {
                         current_value = 1;
@@ -265,7 +292,7 @@ impl GameServer {
                 drop(room);
 
                 let reference = self.get_room(room_id).unwrap();
-                self.update_settings_value(&reference, settings_id, current_value as u32)
+                self.update_settings_value(&reference, data.settings_id, current_value as u32)
                     .await;
 
                 if current_type != GameMode::Custom {
@@ -280,8 +307,8 @@ impl GameServer {
 
                     self.update_config_bulk(&reference, config).await;
                 }
-            } else if settings_id <= 3 {
-                let mut current_value = match settings_id {
+            } else if data.settings_id <= 3 {
+                let mut current_value = match data.settings_id {
                     1 => room.inner().settings.placement_time,
                     2 => room.inner().settings.turn_time,
                     3 => room.inner().settings.buffer_time,
@@ -290,13 +317,13 @@ impl GameServer {
 
                 let group = gameroom::SETTINGS_GROUPS.get(key).unwrap();
 
-                if increased {
+                if data.increased {
                     current_value += group.interval as i32;
                     if current_value as i32 > group.max_val {
                         if group.loopable {
                             current_value = group.min_val;
                         } else {
-                            return;
+                            return Ok(());
                         }
                     }
                 } else {
@@ -305,12 +332,12 @@ impl GameServer {
                         if group.loopable {
                             current_value = group.max_val;
                         } else {
-                            return;
+                            return Ok(());
                         }
                     }
                 }
 
-                match settings_id {
+                match data.settings_id {
                     1 => room.get().write().unwrap().settings.placement_time = current_value as u32,
                     2 => room.get().write().unwrap().settings.turn_time = current_value as u32,
                     3 => room.get().write().unwrap().settings.buffer_time = current_value as u32,
@@ -320,9 +347,11 @@ impl GameServer {
                 drop(room);
                 let reference = self.get_room(room_id).unwrap();
 
-                self.update_settings_value(&reference, settings_id, current_value as u32)
+                self.update_settings_value(&reference, data.settings_id, current_value as u32)
                     .await;
             }
         }
+
+        Ok(())
     }
 }
