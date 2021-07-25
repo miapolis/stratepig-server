@@ -3,13 +3,14 @@ use log::info;
 use std::default;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Config {
+pub struct CliConfig {
     pub one_player: bool,
     pub swift_game_enter: bool,
     pub ignore_turns: bool,
+    pub log_packet_output: bool,
 }
 
-impl Config {
+impl CliConfig {
     pub fn new() -> Self {
         let version = env!("CARGO_PKG_VERSION");
         let authors = env!("CARGO_PKG_AUTHORS");
@@ -31,11 +32,17 @@ impl Config {
                         .short("t")
                         .help("If specified, turns will not be used in game"),
                 )
+                .arg(
+                    Arg::with_name("LOG_PACKET_OUTPUT")
+                    .short("o")
+                    .help("If specified, packets received will be logged")
+                )
                 .get_matches();
 
         let one_player = args.is_present("ONE_PLAYER");
         let swift_game_enter = args.is_present("SWIFT_GAME_ENTER");
         let mut ignore_turns = args.is_present("IGNORE_TURNS");
+        let log_packet_output = args.is_present("LOG_PACKET_OUTPUT");
 
         if one_player {
             ignore_turns = true;
@@ -45,6 +52,7 @@ impl Config {
             one_player,
             swift_game_enter,
             ignore_turns,
+            log_packet_output,
         }
     }
 
@@ -52,7 +60,7 @@ impl Config {
         info!("[Config]");
 
         let mut default = false;
-        if self == &Config::default() {
+        if self == &CliConfig::default() {
             default = true;
         }
 
@@ -60,15 +68,17 @@ impl Config {
         info!("| ONE_PLAYER: {}", self.one_player);
         info!("| SWIFT_GAME_ENTER: {}", self.swift_game_enter);
         info!("| IGNORE_TURNS: {}", self.ignore_turns);
+        info!("| LOG_PACKET_OUTPUT: {}", self.log_packet_output);
     }
 }
 
-impl default::Default for Config {
+impl default::Default for CliConfig {
     fn default() -> Self {
         Self {
             one_player: false,
             swift_game_enter: false,
             ignore_turns: false,
+            log_packet_output: false,
         }
     }
 }

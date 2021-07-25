@@ -1,10 +1,9 @@
 [package]
-name = "stratepig_core"
+name = "stratepig_cli"
 version = "0.1.0"
 authors = ["Miapolis <41233357+Miapolis@users.noreply.github.com>"]
 edition = "2018"
 
 [dependencies]
-vec_map = "0.8.2"
-mio = "0.7.13"
-byteorder = "1.4.3"
+clap = "2.33.3"
+log = "0.4.14"

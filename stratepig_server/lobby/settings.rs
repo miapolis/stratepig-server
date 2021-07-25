@@ -1,8 +1,12 @@
-use crate::board::Pig;
-use crate::gameroom::{self, GameMode, GameRoom, SettingsGroup};
-use crate::GameServer;
-use crate::Packet;
 use std::collections::HashMap;
+use std::convert::TryFrom;
+
+use stratepig_core::{Packet, PacketBody};
+use stratepig_game::Pig;
+
+use crate::gameroom::{self, GameMode, GameRoom, SettingsGroup};
+use crate::packet::GameRequestFullPacket;
+use crate::GameServer;
 
 impl GameServer {
     pub async fn create_room_from_data(
@@ -12,18 +16,16 @@ impl GameServer {
     ) -> Result<impl std::ops::Deref<Target = GameRoom> + '_, &str> {
         macro_rules! err {
             () => {
-                return Err("Invalid config.");
+                return Err("invalid config");
             };
         }
 
         if !data_null {
-            let int_type = packet.read_u32().unwrap_or(1);
-            let mut placement_seconds = packet.read_u32().unwrap_or(300);
-            let mut turn_seconds = packet.read_u32().unwrap_or(15);
-            let mut buffer_seconds = packet.read_u32().unwrap_or(300);
-            let amount_of_pigs = packet.read_u32().unwrap_or(40);
+            let data = GameRequestFullPacket::deserialize(&packet.body).or_else(|_e| {
+                return Err("invalid packet");
+            })?;
 
-            let game_mode = match int_type {
+            let game_mode = match data.game_mode {
                 1 => GameMode::Original,
                 2 => GameMode::Infiltrator,
                 3 => GameMode::Duel,
@@ -32,25 +34,21 @@ impl GameServer {
             };
 
             let placement_group = gameroom::SETTINGS_GROUPS.get(&1).unwrap();
-            placement_seconds = sanitize_setting(placement_seconds, placement_group);
+            let placement_secs = sanitize_setting(data.placement_secs as u32, placement_group);
             let turn_group = gameroom::SETTINGS_GROUPS.get(&2).unwrap();
-            turn_seconds = sanitize_setting(turn_seconds, turn_group);
+            let turn_secs = sanitize_setting(data.turn_secs as u32, turn_group);
             let buffer_group = gameroom::SETTINGS_GROUPS.get(&3).unwrap();
-            buffer_seconds = sanitize_setting(buffer_seconds, buffer_group);
+            let buffer_secs = sanitize_setting(data.buffer_secs as u32, buffer_group);
 
-            let mut pig_config = HashMap::new();
-
-            for _ in 0..amount_of_pigs {
-                let pig = packet.read_u32();
-                let val;
-                match pig {
-                    Ok(v) => val = v,
-                    Err(_) => break,
-                }
-                let amt = packet.read_u32().unwrap_or(0) as u8;
-
-                pig_config.insert(Pig::from(val), amt);
-            }
+            let mut pig_config: HashMap<Pig, u8> = data
+                .pig_config
+                .into_iter()
+                .map(|(pig, amt)| {
+                    let pig = Pig::from(pig as u32);
+                    let amt = u8::try_from(amt).unwrap_or(0);
+                    return (pig, amt);
+                })
+                .collect();
 
             for i in 0..13 {
                 let key = Pig::from(i);
@@ -73,7 +71,6 @@ impl GameServer {
                         err!();
                     }
                 }
-
                 let mut total = 0;
                 for val in pig_config.values() {
                     total += *val;
@@ -85,19 +82,19 @@ impl GameServer {
 
             let room = self.new_room()?;
             let mut write = room.get().write().unwrap();
-
             write.settings.game_mode = game_mode;
-            write.settings.placement_time = placement_seconds;
-            write.settings.turn_time = turn_seconds;
-            write.settings.buffer_time = buffer_seconds;
+            write.settings.placement_time = placement_secs;
+            write.settings.turn_time = turn_secs;
+            write.settings.buffer_time = buffer_secs;
             write.settings.pig_config = pig_config;
             drop(write);
 
-            Ok(room)
+            return Ok(room);
         } else {
             let room = self.new_room()?;
             room.load_default_settings();
-            Ok(room)
+
+            return Ok(room);
         }
     }
 }

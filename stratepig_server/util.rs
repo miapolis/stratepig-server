@@ -32,7 +32,7 @@ macro_rules! unwrap_ret {
     ( $e:expr ) => {
         match $e {
             Some(x) => x,
-            None => return,
+            None => return Err(StratepigError::Unspecified),
         }
     };
 }

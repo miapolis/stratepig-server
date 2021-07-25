@@ -1,35 +1,39 @@
 use std::collections::HashMap;
 use std::convert::TryInto;
 
-use crate::board::{self, Piece, Pig};
+use crate::packet::{GamePlayerReadyDataDefaultPacket, GamePlayerReadyDataFullPacket};
 use crate::player::{Player, PlayerRole};
 use crate::util;
 use crate::GameServer;
-use crate::Packet;
+use crate::StratepigError;
+use stratepig_core::{Packet, PacketBody};
+use stratepig_game::{Piece, Pig};
 
 impl GameServer {
-    pub async fn handle_game_player_ready(&mut self, id: usize, mut packet: Packet) {
-        let id_check = packet.read_string().unwrap_or(String::new());
-        if id.to_string() != id_check {
-            return;
+    pub async fn handle_game_player_ready(
+        &mut self,
+        id: usize,
+        packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = GamePlayerReadyDataDefaultPacket::deserialize(&packet.body)?;
+
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
         }
+
         let ctx = self.get_context(id);
         if let None = ctx {
-            return;
+            return Err(StratepigError::MissingContext);
         }
         let (client, room) = ctx.unwrap();
-        if !room.inner().in_game || room.inner().game_phase == 2 {
-            return;
-        }
         let room_id = room.id();
-        drop(room); // TODO: FIX THIS NOW
+        drop(room);
+
         if client.player.as_ref().is_none() {
-            return;
+            return Err(StratepigError::with("missing player object on client"));
         }
 
-        let ready = packet.read_bool().unwrap_or(false);
-
-        if !ready {
+        if !data.ready {
             let player = self
                 .all_clients
                 .get_mut(id)
@@ -40,21 +44,25 @@ impl GameServer {
             player.is_ready = false;
             let reference = self.get_room(room_id).unwrap();
             self.game_player_ready_state(&reference, id, false).await;
-            return;
+
+            return Ok(());
         }
+
+        let data = GamePlayerReadyDataFullPacket::deserialize(&packet.body)?;
 
         let mut pig_locations = Vec::<Piece>::new();
         let mut provided_config = HashMap::new();
-        let length = packet.read_u32().unwrap_or(0);
 
-        for _ in 0..length {
-            let pig = Pig::from(packet.read_u32().unwrap_or(0));
-            let location = packet.read_u32().unwrap_or(0);
-            if !board::in_starting_bounds(location.try_into().unwrap_or(0)) {
-                return;
+        for (pig, location) in data.board.into_iter() {
+            let pig = Pig::from(pig);
+            if let Pig::Empty = pig {
+                return Err(StratepigError::with("invalid pig"));
+            }
+            if !stratepig_game::in_starting_bounds(location.try_into().unwrap_or(0)) {
+                return Err(StratepigError::with("location out of bounds"));
             }
             if pig_locations.iter().any(|x| x.location == location as u8) {
-                return;
+                return Err(StratepigError::with("duplicate location placement"));
             }
 
             // Safe to cast using as, since above checks ensures location is between 1 and 40
@@ -76,7 +84,9 @@ impl GameServer {
         let config = reference.inner().settings.pig_config.clone();
         for (pig, amount) in config {
             if provided_config.get(&pig).unwrap_or(&0) != &amount {
-                return;
+                return Err(StratepigError::with(
+                    "board config does not agree with settings",
+                ));
             }
         }
         drop(reference);
@@ -100,7 +110,7 @@ impl GameServer {
                     self.register_board_data(room_id).await;
                 }
             }
-        } else {
+        } else if self.config.one_player {
             let mut fake_enemy = Player::new(PlayerRole::Two);
             fake_enemy.is_ready = true;
             fake_enemy.initialize_setup(pig_locations);
@@ -109,6 +119,8 @@ impl GameServer {
             drop(reference);
             self.register_board_data(room_id).await;
         }
+
+        Ok(())
     }
 
     async fn register_board_data(&mut self, room_id: usize) {
@@ -139,6 +151,8 @@ impl GameServer {
 
             self.opponent_pig_placement(*id, locations).await;
         }
+
+        self.run_operations(&room, true).await;
 
         room.start_phase_two().await;
         let clients = room.clients();
