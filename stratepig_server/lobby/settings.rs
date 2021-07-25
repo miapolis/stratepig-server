@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use stratepig_core::{Packet, PacketBody};
+use stratepig_game::Pig;
 
-use crate::board::Pig;
 use crate::gameroom::{self, GameMode, GameRoom, SettingsGroup};
 use crate::packet::GameRequestFullPacket;
 use crate::GameServer;

@@ -1,7 +1,6 @@
-use bincode::Options;
 use serde::{Deserialize, Serialize};
 
-use crate::stratepig_derive::{client_packet, server_packet};
+use crate::stratepig_macros::{client_packet, server_packet};
 use crate::PacketBody;
 use stratepig_core;
 
@@ -18,6 +17,12 @@ pub struct WelcomePacket {
 #[server_packet(2)]
 pub struct KickedPacket {
     pub msg: String,
+}
+
+#[server_packet(3)]
+pub struct ClientDisconnectPacket {
+    pub id: String,
+    pub timestamp: u64,
 }
 
 #[server_packet(4)]
@@ -70,6 +75,12 @@ pub struct SettingsValueChangedPacket {
     pub value: u32,
 }
 
+#[server_packet(12)]
+pub struct PigItemValueChangedPacket {
+    pub pig: u32,
+    pub amount: u32,
+}
+
 #[server_packet(13)]
 pub struct PigConfigValueChangedPacket {
     pub turn_time: u32,
@@ -82,9 +93,67 @@ pub struct RoomTimerUpdatePacket {
     pub timestamp: i64,
 }
 
+#[server_packet(15)]
+pub struct BothClientsLoadedGamePacket;
+
+#[server_packet(17)]
+pub struct GamePlayerUpdatedReadyStatePacket {
+    pub id: String,
+    pub ready: bool,
+}
+
+#[server_packet(18)]
+pub struct OpponentPigPlacementPacket {
+    pub locations: Vec<u8>,
+}
+
+#[server_packet(19)]
+pub struct MoveDataPacket {
+    pub role: u32,
+    pub from: u8,
+    pub to: u8,
+    pub bundle_null: bool,
+}
+
+#[server_packet(19)]
+pub struct MoveDataAttackPacket {
+    pub role: u32,
+    pub from: u8,
+    pub to: u8,
+    pub bundle_null: bool,
+    pub result: i32,
+    pub init_type: u32,
+    pub target_type: u32,
+}
+
 #[server_packet(20)]
 pub struct TurnInitPacket {
     pub role: u32,
+}
+
+#[server_packet(21)]
+pub struct TurnSecondUpdatePacket {
+    pub role: u32,
+    pub turn_timestamp: u64,
+    pub is_buffer: bool,
+}
+
+#[server_packet(22)]
+pub struct WinPacket {
+    pub role: u32,
+    pub win_type: u32,
+    pub elapsed: u64,
+    pub immediate: bool,
+}
+
+#[server_packet(23)]
+pub struct EnemyPieceDataPacket {
+    pub data: Vec<(u8, u8)>,
+}
+
+#[server_packet(24)]
+pub struct ClientPlayAgainPacket {
+    pub id: String,
 }
 
 ////////////////////////////////////////
@@ -135,12 +204,56 @@ pub struct UpdateSettingsValue {
     pub increased: bool,
 }
 
+#[client_packet(5)]
+pub struct UpdatePigItemValuePacket {
+    pub my_id: String,
+    pub pig: u32,
+    pub increased: bool,
+}
+
+#[client_packet(6)]
+pub struct FinishedSceneLoadPacket {
+    pub my_id: String,
+    pub scene_index: u32,
+}
+
+#[client_packet(7)]
+pub struct GamePlayerReadyDataDefaultPacket {
+    pub my_id: String,
+    pub ready: bool,
+}
+
+#[client_packet(7)]
+pub struct GamePlayerReadyDataFullPacket {
+    pub my_id: String,
+    pub ready: bool,
+    pub board: Vec<(u32, u32)>,
+}
+
+#[client_packet(8)]
+pub struct MovePacket {
+    pub my_id: String,
+    pub from_location: u8,
+    pub to_location: u8,
+}
+
+#[client_packet(9)]
+pub struct SurrenderPacket {
+    pub my_id: String,
+}
+
 #[client_packet(10)]
 pub struct LeaveGamePacket {
     pub my_id: String,
 }
 
+#[client_packet(11)]
+pub struct PlayAgainPacket {
+    pub my_id: String,
+}
+
 #[allow(dead_code)]
+#[derive(Debug)]
 /// Messages that the server can send to the client
 pub enum ServerMessage {
     Welcome = 1,
@@ -167,6 +280,39 @@ pub enum ServerMessage {
     Win = 22,
     EnemyPieceData = 23,
     ClientPlayAgain = 24,
+    Null,
+}
+
+impl ServerMessage {
+    pub fn from(id: u8) -> Self {
+        match id {
+            1 => Self::Welcome,
+            2 => Self::Kicked,
+            3 => Self::ClientDisconnect,
+            4 => Self::RoomPlayerAdd,
+            5 => Self::RoomPlayerUpdatedReadyState,
+            6 => Self::FailCreateGame,
+            7 => Self::ErrorJoinGame,
+            8 => Self::ClientInfo,
+            9 => Self::GameInfo,
+            10 => Self::UpdatedPigIcon,
+            11 => Self::SettingsValueChanged,
+            12 => Self::PigItemValueChanged,
+            13 => Self::PigConfigValueChanged,
+            14 => Self::RoomTimerUpdate,
+            15 => Self::BothClientsLoadedGame,
+            16 => Self::GameTimerUpdate,
+            17 => Self::GamePlayerUpdatedReadyState,
+            18 => Self::OpponentPigPlacement,
+            19 => Self::MoveData,
+            20 => Self::TurnInit,
+            21 => Self::TurnSecondUpdate,
+            22 => Self::Win,
+            23 => Self::EnemyPieceData,
+            24 => Self::ClientPlayAgain,
+            _ => Self::Null,
+        }
+    }
 }
 
 #[allow(dead_code)]

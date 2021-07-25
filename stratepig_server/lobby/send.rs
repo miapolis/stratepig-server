@@ -32,10 +32,11 @@ impl GameServer {
     }
 
     pub async fn client_disconnected(&self, room: &GameRoom, id: usize) {
-        // let mut packet = Packet::new_id(ServerMessage::ClientDisconnect as i32);
-        // packet.write_str(&id.to_string());
-        // packet.write_u64(0); // TODO: actually calculate elapsed unix timestamp
-        // self.message_room(room, packet).await;
+        let packet = ClientDisconnectPacket {
+            id: id.to_string(),
+            timestamp: 0, // TODO: actually calculate elapsed unix timestamp
+        };
+        self.message_room(room, packet).await;
     }
 
     pub async fn send_game_info(&self, room: &GameRoom, id: Option<usize>) {
@@ -52,7 +53,7 @@ impl GameServer {
                 .pig_config
                 .iter()
                 .map(|(key, value)| {
-                    return ((*key as u32, *value as u32));
+                    return (*key as u32, *value as u32);
                 })
                 .collect(),
         };
@@ -101,7 +102,16 @@ impl GameServer {
         self.message_room(room, packet).await;
     }
 
-    pub async fn update_config_bulk(&self, room: &GameRoom, config: HashMap<board::Pig, u8>) {
+    pub async fn update_pig_item(&self, room: &GameRoom, pig: u32, amount: u32) {
+        let packet = PigItemValueChangedPacket { pig, amount };
+        self.message_room(room, packet).await;
+    }
+
+    pub async fn update_config_bulk(
+        &self,
+        room: &GameRoom,
+        config: HashMap<stratepig_game::Pig, u8>,
+    ) {
         let read = room.inner();
 
         let packet = PigConfigValueChangedPacket {
@@ -110,7 +120,7 @@ impl GameServer {
             pig_config: config
                 .iter()
                 .map(|(key, value)| {
-                    return ((*key as u32, *value as u32));
+                    return (*key as u32, *value as u32);
                 })
                 .collect(),
         };

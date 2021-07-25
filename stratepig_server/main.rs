@@ -9,14 +9,13 @@ use std::thread;
 use std::time;
 use vec_map::VecMap;
 
+use stratepig_cli::CliConfig;
 use stratepig_core::server::{Server, ServerEvent};
 use stratepig_core::Token;
 use stratepig_core::{Packet, PacketBody, PacketRecipient};
-use stratepig_derive;
+use stratepig_macros;
 
-mod board;
 mod client;
-mod config;
 mod constants;
 mod error;
 mod game;
@@ -26,12 +25,10 @@ mod log_init;
 mod macros;
 mod packet;
 mod player;
-mod test_util;
 mod util;
 mod version;
 mod win;
 use client::Client;
-use config::Config;
 use error::StratepigError;
 use gameroom::{GameRoom, GameRoomError};
 use packet::{ClientMessage::*, *};
@@ -45,7 +42,7 @@ type PacketHandler = fn(
 
 pub struct GameServer {
     server: Arc<Mutex<Server>>,
-    config: Config,
+    config: CliConfig,
     packet_handlers: VecMap<PacketHandler>,
     all_clients: VecMap<Client>,
     game_rooms: Arc<Mutex<VecMap<GameRoom>>>,
@@ -59,7 +56,7 @@ const PRUNE_INTERVAL_SECS: u64 = 180;
 const MAX_PRUNE_AGE_SECS: u64 = 300;
 
 impl GameServer {
-    fn new(config: Config) -> Result<Self, stratepig_core::Error> {
+    fn new(config: CliConfig) -> Result<Self, stratepig_core::Error> {
         let server = Server::new("0.0.0.0", 32500, 30)?;
 
         Ok(Self {
@@ -84,13 +81,15 @@ impl GameServer {
 
         // rustfmt friendly
         register!(GameRequestSent, Self::handle_game_request);
-        register!(LeaveGame, Self::handle_client_leave);
         register!(UpdateReadyState, Self::handle_ready_state_change);
         register!(UpdatePigIcon, Self::handle_update_icon);
         register!(UpdateSettingsValue, Self::handle_settings_value_update);
+        register!(UpdatePigItemValue, Self::handle_pig_item_update);
         register!(FinishedSceneLoad, Self::handle_client_finish_scene_load);
         register!(GamePlayerReadyData, Self::handle_game_player_ready);
         register!(Move, Self::move_received);
+        register!(Surrender, Self::handle_surrender);
+        register!(LeaveGame, Self::handle_client_leave);
         register!(PlayAgain, Self::handle_client_play_again);
     }
 
@@ -194,7 +193,7 @@ impl GameServer {
         if let Some(func) = handlers.get(packet.header.id as usize) {
             {
                 let res = func(self, token.0, packet.clone()).await;
-                if self.config.log_packet_errors {
+                if self.config.log_packet_output {
                     info!(
                         "Client {}: {:?} ==> {:?}",
                         token.0,
@@ -207,6 +206,9 @@ impl GameServer {
     }
 
     pub async fn message_one(&self, id: usize, packet: impl PacketBody) {
+        if self.config.log_packet_output {
+            info!("OUTBOUND({}) => {:?}", id, ServerMessage::from(packet.id()));
+        }
         self.server
             .lock()
             .send(PacketRecipient::Single(Token(id)), packet);
@@ -214,6 +216,17 @@ impl GameServer {
 
     pub async fn message_room(&self, room: &GameRoom, packet: impl PacketBody) {
         let tokens: Vec<Token> = room.clients().into_iter().map(|x| Token(x)).collect();
+        if self.config.log_packet_output {
+            info!(
+                "OUTBOUND({:?}) => {:?}",
+                tokens
+                    .clone()
+                    .into_iter()
+                    .map(|x| x.0)
+                    .collect::<Vec<usize>>(),
+                ServerMessage::from(packet.id())
+            );
+        }
         self.server
             .lock()
             .send(PacketRecipient::Include(tokens), packet);
@@ -356,7 +369,7 @@ impl GameServer {
                     pruned += 1;
                 }
 
-                info!("Pruned {} room(s)", pruned);
+                info!("Pruned {} room(s) | ({})", pruned, game_rooms.len());
             }
         });
     }
@@ -367,7 +380,7 @@ async fn main() {
     log_init::init();
     info!("Starting Stratepig Server...");
 
-    let config = Config::new();
+    let config = CliConfig::new();
     config.log();
     let mut server = GameServer::new(config).unwrap_or_else(|e| {
         eprintln!("Error creating server: {}", e);

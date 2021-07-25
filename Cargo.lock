@@ -551,7 +551,6 @@ version = "0.6.9"
 dependencies = [
  "async-scoped",
  "bincode",
- "clap",
  "futures 0.1.31",
  "lazy_static",
  "log",
@@ -560,10 +559,20 @@ dependencies = [
  "rand",
  "serde",
  "simplelog",
+ "stratepig_cli",
  "stratepig_core",
- "stratepig_derive",
+ "stratepig_game",
+ "stratepig_macros",
  "tokio",
  "vec_map",
+]
+
+[[package]]
+name = "stratepig_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "log",
 ]
 
 [[package]]
@@ -576,7 +585,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "stratepig_derive"
+name = "stratepig_game"
+version = "0.1.0"
+
+[[package]]
+name = "stratepig_macros"
 version = "0.1.0"
 dependencies = [
  "bincode",

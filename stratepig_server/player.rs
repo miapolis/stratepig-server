@@ -1,5 +1,6 @@
-use crate::board::*;
 use crate::client::Client;
+
+use stratepig_game::{Board, Piece};
 
 #[derive(Debug)]
 pub struct Player {
@@ -19,6 +20,7 @@ pub struct Player {
 pub enum PlayerRole {
     One = 1,
     Two = 2,
+    Tie = -1,
 }
 
 impl PlayerRole {
@@ -26,6 +28,7 @@ impl PlayerRole {
         match self {
             Self::One => Self::Two,
             Self::Two => Self::One,
+            _ => Self::Tie,
         }
     }
 }

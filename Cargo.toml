@@ -4,15 +4,25 @@ version = "0.6.9"
 authors = ["Miapolis <41233357+Miapolis@users.noreply.github.com>"]
 edition = "2018"
 
+[[bin]]
+bench = false
+path = "stratepig_server/main.rs"
+name = "stratepig_server"
+
 [workspace]
 members = [
+    "stratepig_cli",
     "stratepig_core",
-    "stratepig_derive",
+    "stratepig_macros",
+    "stratepig_game",
 ]
 
 [dependencies]
+stratepig_cli = { path = "./stratepig_cli" }
 stratepig_core = { path = "./stratepig_core" }
-stratepig_derive = { path = "./stratepig_derive" }
+stratepig_macros = { path = "./stratepig_macros" }
+stratepig_game = { path = "./stratepig_game" }
+
 tokio = { version = "1.5.0", features = ["full"] }
 async-scoped = { version = "0.6.1", features = ["use-tokio"] }
 serde = { version = "1.0.63", features = ["derive"] }
@@ -22,7 +32,6 @@ rand = "0.8.0"
 vec_map = "0.8.2"
 lazy_static = "1.4.0"
 owning_ref = "0.4.1"
-clap = "2.33.3"
 log = "0.4.14"
 simplelog = "0.10.0"
 bincode = "1.3.3"

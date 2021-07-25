@@ -4,6 +4,7 @@ pub enum StratepigError {
 
     AssumeWrongId,
     MissingContext,
+    Unspecified,
     Default(String),
 }
 

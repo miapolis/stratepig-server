@@ -5,14 +5,16 @@ use crate::constants;
 use crate::gameroom;
 use crate::gameroom::{GameMode, GameRoomError};
 use crate::packet::{
-    GameRequestDefaultPacket, GameRequestFullPacket, LeaveGamePacket, RoomTimerUpdatePacket,
-    UpdatePigIconPacket, UpdateReadyStatePacket, UpdateSettingsValue,
+    GameRequestDefaultPacket, LeaveGamePacket, RoomTimerUpdatePacket, UpdatePigIconPacket,
+    UpdatePigItemValuePacket, UpdateReadyStatePacket, UpdateSettingsValue,
 };
 use crate::player::{PlayerRole, RoomPlayer};
 use crate::GameServer;
 use crate::StratepigError;
 mod send;
 mod settings;
+
+use stratepig_game::Pig;
 
 impl GameServer {
     pub async fn handle_game_request(
@@ -59,10 +61,8 @@ impl GameServer {
 
             let room = room.unwrap();
             let room_id = room.id();
-            let mut write = room.get().write().unwrap();
-            write.client_ids.push(id);
+            room.get().write().unwrap().client_ids.push(id);
 
-            drop(write);
             drop(room);
 
             let client = self.all_clients.get_mut(id).unwrap();
@@ -101,6 +101,14 @@ impl GameServer {
                     let read = found.inner();
                     let room_id = read.id;
                     let safe_username = self.generate_safe_username(&found, &data.username);
+                    let client_count = read.client_ids.len();
+
+                    let player_role;
+                    if client_count == 0 {
+                        player_role = PlayerRole::One;
+                    } else {
+                        player_role = PlayerRole::Two;
+                    }
 
                     drop(read);
                     drop(found);
@@ -108,7 +116,7 @@ impl GameServer {
                     let client = self.all_clients.get_mut(id).unwrap();
                     client.set_game_room(room_id);
                     client.room_player = Some(RoomPlayer::new(
-                        PlayerRole::Two,
+                        player_role,
                         safe_username,
                         data.icon as u8,
                         client,
@@ -124,7 +132,7 @@ impl GameServer {
 
                     let reference = self.get_room(room_id).unwrap();
 
-                    self.initialize_player(id, PlayerRole::Two).await;
+                    self.initialize_player(id, player_role).await;
                     self.room_player_add(&reference).await;
                     self.send_game_info(&reference, Some(id)).await;
                 }
@@ -137,7 +145,7 @@ impl GameServer {
     pub async fn handle_client_leave(
         &mut self,
         id: usize,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = LeaveGamePacket::deserialize(&packet.body)?;
 
@@ -160,7 +168,7 @@ impl GameServer {
     pub async fn handle_ready_state_change(
         &mut self,
         id: usize,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdateReadyStatePacket::deserialize(&packet.body)?;
 
@@ -218,7 +226,7 @@ impl GameServer {
     pub async fn handle_update_icon(
         &mut self,
         id: usize,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdatePigIconPacket::deserialize(&packet.body)?;
 
@@ -255,7 +263,7 @@ impl GameServer {
     pub async fn handle_settings_value_update(
         &mut self,
         id: usize,
-        mut packet: Packet,
+        packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdateSettingsValue::deserialize(&packet.body)?;
 
@@ -268,7 +276,6 @@ impl GameServer {
             return Err(StratepigError::MissingContext);
         }
         let (client, room) = ctx.unwrap();
-        let room_id = room.id();
 
         if client.player.as_ref().unwrap().role == PlayerRole::One {
             let key = &(u8::try_from(data.settings_id).unwrap_or(0));
@@ -289,23 +296,21 @@ impl GameServer {
 
                 let current_type = GameMode::from(current_value);
                 room.get().write().unwrap().settings.game_mode = current_type;
-                drop(room);
 
-                let reference = self.get_room(room_id).unwrap();
-                self.update_settings_value(&reference, data.settings_id, current_value as u32)
+                self.update_settings_value(&room, data.settings_id, current_value as u32)
                     .await;
 
                 if current_type != GameMode::Custom {
                     let config = gameroom::get_pig_config_for_mode(current_type).unwrap();
                     let settings_vars = gameroom::get_settings_vars(current_type);
 
-                    let mut write = reference.get().write().unwrap();
+                    let mut write = room.get().write().unwrap();
                     write.settings.turn_time = settings_vars.turn_time;
                     write.settings.buffer_time = settings_vars.buffer_time;
                     write.settings.pig_config = config.clone();
                     drop(write);
 
-                    self.update_config_bulk(&reference, config).await;
+                    self.update_config_bulk(&room, config).await;
                 }
             } else if data.settings_id <= 3 {
                 let mut current_value = match data.settings_id {
@@ -344,14 +349,66 @@ impl GameServer {
                     _ => {}
                 };
 
-                drop(room);
-                let reference = self.get_room(room_id).unwrap();
-
-                self.update_settings_value(&reference, data.settings_id, current_value as u32)
+                self.update_settings_value(&room, data.settings_id, current_value as u32)
                     .await;
             }
         }
 
         Ok(())
+    }
+
+    pub async fn handle_pig_item_update(
+        &mut self,
+        id: usize,
+        packet: Packet,
+    ) -> Result<(), StratepigError> {
+        let data = UpdatePigItemValuePacket::deserialize(&packet.body)?;
+
+        if id.to_string() != data.my_id {
+            return Err(StratepigError::AssumeWrongId);
+        }
+        if let Pig::Empty = Pig::from(data.pig) {
+            return Err(StratepigError::with("invalid pig"));
+        }
+
+        let ctx = self.get_context(id);
+        if let None = ctx {
+            return Err(StratepigError::MissingContext);
+        }
+        let (client, room) = ctx.unwrap();
+
+        if client.player.as_ref().unwrap().role == PlayerRole::One {
+            let mut pig_config = room.inner().settings.pig_config.clone();
+            let total: u32 = pig_config.iter().map(|(_k, v)| *v as u32).sum();
+            let pig = Pig::from(data.pig);
+
+            if data.increased {
+                if total + 1 > 40 {
+                    return Ok(());
+                }
+                let current = *pig_config.get(&pig).unwrap();
+                pig_config.insert(pig, current + 1);
+            } else {
+                let current = *pig_config.get(&pig).unwrap();
+                if (current as i16) - 1 < 0 || (total as i32) - 1 < 0 {
+                    return Ok(());
+                }
+                pig_config.insert(pig, current - 1);
+            }
+
+            let updated = *pig_config.get(&pig).unwrap();
+            let mut write = room.get().write().unwrap();
+            write.settings.game_mode = GameMode::Custom;
+            write.settings.pig_config = pig_config;
+            drop(write);
+
+            self.update_settings_value(&room, 0, GameMode::Custom as u32)
+                .await;
+            self.update_pig_item(&room, data.pig, updated as u32).await;
+
+            return Ok(());
+        }
+
+        return Err(StratepigError::with("invalid authority"));
     }
 }
