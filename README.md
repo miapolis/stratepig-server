@@ -32,3 +32,6 @@ However, I do now have a blazingly fast server as far as I am aware.
 The core crate is mostly a mirror of [grubbnet](https://github.com/Dooskington/grubbnet),
 with some minor improvements and using a newer version of [mio](https://github.com/tokio-rs/mio).
 I also added macros to help with defining packets in [stratepig_macros](stratepig_macros).
+
+#### stratepig_updater
+Elixir update server for client downloads and possibly other things in the future.
