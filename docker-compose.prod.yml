@@ -1,0 +1,7 @@
+version: "3.9"
+
+services: 
+    stratepig_updater:
+        image: stratepig_server/stratepig_updater
+    stratepig_updater:
+        image: stratepig_server/stratepig_server

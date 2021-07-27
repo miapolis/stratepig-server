@@ -3,12 +3,14 @@ defmodule StratepigUpdater.Routers.Game do
   import Plug.Conn
 
   alias StratepigUpdater.Updater.Download
+  alias StratepigUpdater.Utils.Version
+  alias StratepigUpdater.Utils.Files
 
-  plug :match
-  plug :dispatch
+  plug(:match)
+  plug(:dispatch)
 
   get "/version" do
-    send_resp(conn, 200, StratepigUpdater.MixProject.version())
+    send_resp(conn, 200, Version.project_version())
   end
 
   get "/update" do
@@ -18,7 +20,7 @@ defmodule StratepigUpdater.Routers.Game do
   end
 
   get "/d" do
-    Download.stream_file(conn, "./priv/static/hello.dap", "hello.dap")
+    Download.stream_file(conn, Files.binary(:game), "Build.zip")
   end
 
   match _ do

@@ -5,14 +5,11 @@ defmodule StratepigUpdater.MixProject do
     [
       app: :stratepig_updater,
       version: "0.7.1",
-      elixir: "~> 1.12",
+      elixir: ">= 1.11.3",
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
   end
-
-  def version(), do: project()[:version]
-  def launcher_version(), do: "0.2.1"
 
   def application do
     [
