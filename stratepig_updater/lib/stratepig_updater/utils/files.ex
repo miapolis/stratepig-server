@@ -17,6 +17,14 @@ defmodule StratepigUpdater.Utils.Files do
     end
   end
 
+  @spec version_file(updatable) :: any()
+  def version_file(typ) do
+    case typ do
+      :launcher -> static_asset("versions/launcher.txt")
+      :game -> static_asset("versions/game.txt")
+    end
+  end
+
   @spec binary(updatable) :: any()
   def binary(typ) do
     case typ do
