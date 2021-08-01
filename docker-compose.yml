@@ -2,10 +2,14 @@ version: "3.9"
 
 services:
     stratepig_updater:
-        build: ./stratepig_updater\
+        build: ./stratepig_updater
+        volumes:
+            - updater:/files
         ports: 
             - 4001:4001
     stratepig_server: 
         build: .
         ports: 
             - 32500:32500
+volumes:
+    updater:

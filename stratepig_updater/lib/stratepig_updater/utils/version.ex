@@ -8,6 +8,6 @@ defmodule StratepigUpdater.Utils.Version do
   @spec launcher_version() :: String.t()
   def launcher_version() do
     # Eh
-    "0.2.1"
+    "0.2.2"
   end
 end

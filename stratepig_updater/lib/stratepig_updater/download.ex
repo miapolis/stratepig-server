@@ -3,11 +3,12 @@ defmodule StratepigUpdater.Updater.Download do
 
   @spec stream_file(Plug.Conn.t(), String.t(), String.t()) :: any()
   def stream_file(conn, path, display_name) do
+    %{size: size} = File.stat!("#{path}")
     file_stream = File.stream!("#{path}", [], 200)
 
     conn =
       conn
-      |> put_resp_content_type("application/event-stream")
+      |> put_resp_header("X-Content-Length", Integer.to_string(size, 10))
       |> put_resp_header("Content-disposition", "attachment; filename=\"#{display_name}\"")
       |> put_resp_header("X-Accel-Redirect", "/tempfile/download/#{display_name}")
       |> put_resp_header("Content-Type", "application/octet-stream")
