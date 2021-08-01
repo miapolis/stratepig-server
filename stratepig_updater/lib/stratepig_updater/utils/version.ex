@@ -20,7 +20,7 @@ defmodule StratepigUpdater.Utils.Version do
 
   @spec launcher_version() :: String.t()
   def launcher_version() do
-    [{"game", contents}] = :ets.lookup(:version_info, "game")
+    [{"launcher", contents}] = :ets.lookup(:version_info, "launcher")
     contents
   end
 end
