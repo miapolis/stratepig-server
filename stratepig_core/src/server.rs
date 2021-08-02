@@ -152,8 +152,6 @@ impl Server {
                 LOCAL_TOKEN => loop {
                     match self.tcp_listener.accept() {
                         Ok((mut socket, addr)) => {
-                            println!("Accepting connection...");
-
                             self.token_counter += 1;
                             let token = Token(self.token_counter);
 
