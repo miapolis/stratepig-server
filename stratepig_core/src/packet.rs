@@ -3,7 +3,7 @@ use std::any::Any;
 use std::io::Cursor;
 
 use crate::buffer::NetworkBuffer;
-use crate::Error;
+use crate::error::Error;
 
 pub const PACKET_HEADER_SIZE: usize = 3;
 pub const MAX_PACKET_BODY_SIZE: usize = 8192;
@@ -48,16 +48,12 @@ pub fn serialize_packet(body: Box<dyn PacketBody>) -> Result<Vec<u8>, Error> {
     Ok(data)
 }
 
-pub fn deserialize_packet_header(buffer: &mut NetworkBuffer) -> Result<PacketHeader, Error> {
-    let mut reader = Cursor::new(&buffer.data[..]);
+pub fn deserialize_packet_header(data: &[u8]) -> Result<PacketHeader, Error> {
+    let mut reader = Cursor::new(data);
 
     let body_size = reader.read_u16::<LittleEndian>()? as usize;
 
     if body_size >= MAX_PACKET_BODY_SIZE {
-        eprintln!(
-            "Packet body is {} bytes, max body size is {}",
-            body_size, MAX_PACKET_BODY_SIZE
-        );
         return Err(Error::InvalidData("packet body too large".to_owned()));
     }
 

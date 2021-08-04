@@ -33,7 +33,7 @@ impl GameServer {
 
         if data.scene_index <= 2 {
             self.all_clients
-                .get_mut(id)
+                .get_mut(&id)
                 .unwrap()
                 .player
                 .as_mut()

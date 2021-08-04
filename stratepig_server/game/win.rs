@@ -35,7 +35,7 @@ impl GameServer {
                 opp_player = read.fake_enemy.as_ref().unwrap();
             } else if client_ids.len() == 2 {
                 opp_player = self
-                    .get_client(room.other_id(*id))
+                    .get_client(room.other_id(id.0))
                     .unwrap()
                     .player
                     .as_ref()
@@ -54,7 +54,7 @@ impl GameServer {
             }
             drop(read);
 
-            self.send_enemy_piece_data(*id, setup).await;
+            self.send_enemy_piece_data(id.0, setup).await;
         }
     }
 }

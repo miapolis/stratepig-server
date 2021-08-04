@@ -244,7 +244,7 @@ impl GameServer {
             drop(room);
 
             for client_id in clients {
-                self.get_client_mut(client_id).unwrap().reset();
+                self.get_client_mut(client_id.0).unwrap().reset();
             }
         }
 

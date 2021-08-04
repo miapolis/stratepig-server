@@ -8,6 +8,9 @@ use stratepig_core;
 ////// SERVER PACKETS //////////////////
 ////////////////////////////////////////
 
+#[server_packet(0)]
+pub struct KeepAlivePacket;
+
 #[server_packet(1)]
 pub struct WelcomePacket {
     pub version: String,
@@ -256,6 +259,7 @@ pub struct PlayAgainPacket {
 #[derive(Debug)]
 /// Messages that the server can send to the client
 pub enum ServerMessage {
+    KeepAlive = 0,
     Welcome = 1,
     Kicked = 2,
     ClientDisconnect = 3,

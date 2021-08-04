@@ -16,7 +16,7 @@ impl GameServer {
         let read = room.inner();
 
         for id in read.client_ids.iter() {
-            let client = self.all_clients.get(*id).unwrap();
+            let client = self.all_clients.get(&id.0).unwrap();
             let room_player = client.room_player.as_ref().unwrap();
 
             let packet = RoomPlayerAddPacket {

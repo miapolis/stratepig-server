@@ -36,7 +36,7 @@ impl GameServer {
         if !data.ready {
             let player = self
                 .all_clients
-                .get_mut(id)
+                .get_mut(&id)
                 .unwrap()
                 .player
                 .as_mut()
@@ -93,7 +93,7 @@ impl GameServer {
 
         let player = self
             .all_clients
-            .get_mut(id)
+            .get_mut(&id)
             .unwrap()
             .player
             .as_mut()
@@ -140,7 +140,7 @@ impl GameServer {
                     .collect();
             } else {
                 let opp_board = &self
-                    .get_other_player(&room, *id)
+                    .get_other_player(&room, id.0)
                     .unwrap()
                     .player
                     .as_ref()
@@ -149,7 +149,7 @@ impl GameServer {
                 locations = opp_board.iter().map(|x| x.location).collect();
             }
 
-            self.opponent_pig_placement(*id, locations).await;
+            self.opponent_pig_placement(id.0, locations).await;
         }
 
         self.run_operations(&room, true).await;
@@ -160,7 +160,7 @@ impl GameServer {
         drop(room);
 
         for id in clients {
-            let player = self.get_player_mut(id).unwrap();
+            let player = self.get_player_mut(id.0).unwrap();
             player.current_buffer = buffer as u64;
         }
 

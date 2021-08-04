@@ -11,6 +11,7 @@ use crate::player::{Player, PlayerRole};
 use crate::util::unix_now;
 use crate::util::unix_timestamp_to;
 use crate::win::WinType;
+use crate::Endpoint;
 use crate::GameServer;
 
 use crate::message_room;
@@ -21,7 +22,7 @@ use stratepig_game::Pig;
 pub struct GameRoomInner {
     pub id: usize,
     pub code: String,
-    pub client_ids: Vec<usize>,
+    pub client_ids: Vec<(usize, Endpoint)>,
     pub in_game: bool,
     pub game_phase: u8,
     pub game_ended: bool,
@@ -73,7 +74,7 @@ impl GameRoom {
         self.0.read().unwrap().id
     }
 
-    pub fn clients(&self) -> Vec<usize> {
+    pub fn clients(&self) -> Vec<(usize, Endpoint)> {
         self.0.read().unwrap().client_ids.clone()
     }
 
@@ -83,13 +84,13 @@ impl GameRoom {
 
     pub fn other_id(&self, id: usize) -> usize {
         let clients = self.clients();
-        let other: Vec<&usize> = clients.iter().filter(|x| **x != id).collect();
-        *other[0]
+        let other: Vec<usize> = clients.iter().map(|x| x.0).filter(|x| *x != id).collect();
+        other[0]
     }
 
     pub fn get_active_id(&self, game: &GameServer) -> usize {
         let role = self.inner().current_turn;
-        for id in self.clients().iter() {
+        for (id, _endpoint) in self.clients().iter() {
             let player = game.get_player(*id).unwrap();
             if player.role == role {
                 return *id;
@@ -137,7 +138,7 @@ impl GameRoom {
         let role = self.inner().current_turn;
 
         let inner = self.get().clone();
-        let server = game.server.clone();
+        let handler = game.handler.clone();
 
         let player = game.get_player(self.get_active_id(game));
         if player.is_none() {
@@ -154,7 +155,7 @@ impl GameRoom {
             let packet = TurnInitPacket { role: role as u32 };
             {
                 // For some weird reason this is required to be in a separate scope
-                message_room!(server, inner, packet);
+                message_room!(handler, inner, packet);
             }
 
             let turn_duration =
@@ -167,7 +168,7 @@ impl GameRoom {
                 is_buffer: false,
             };
             {
-                message_room!(server, inner, packet);
+                message_room!(handler, inner, packet);
             }
 
             time::sleep(turn_duration).await;
@@ -181,7 +182,7 @@ impl GameRoom {
                 is_buffer: true,
             };
             {
-                message_room!(server, inner, packet);
+                message_room!(handler, inner, packet);
             }
 
             inner.write().unwrap().last_buffer_timestamp = Some(unix_now());
@@ -204,7 +205,7 @@ impl GameRoom {
 
                 drop(read);
 
-                message_room!(server, inner, packet);
+                message_room!(handler, inner, packet);
             }
         });
         write.game_ticker = Some(handle);
@@ -247,8 +248,8 @@ impl Drop for GameRoomInner {
 
 impl GameServer {
     pub fn get_client_by_name(&self, room: &GameRoom, username: &str) -> Option<&Client> {
-        for id in room.clients() {
-            let client = self.all_clients.get(id).unwrap();
+        for (id, _endpoint) in room.clients() {
+            let client = self.all_clients.get(&id).unwrap();
             if let None = client.room_player {
                 continue;
             }
@@ -272,11 +273,16 @@ impl GameServer {
     }
 
     pub fn get_other_player(&self, room: &GameRoom, id: usize) -> Option<&Client> {
-        let result: Vec<usize> = room.clients().into_iter().filter(|x| *x != id).collect();
+        let result: Vec<usize> = room
+            .clients()
+            .iter()
+            .map(|x| x.0)
+            .filter(|x| *x != id)
+            .collect();
         if result.len() == 0 {
             return None;
         } else {
-            return Some(self.all_clients.get(result[0]).unwrap());
+            return Some(self.all_clients.get(&result[0]).unwrap());
         }
     }
 }

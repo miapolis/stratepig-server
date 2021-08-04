@@ -10,9 +10,9 @@ impl GameServer {
 
         let client_ids = room.inner().client_ids.clone();
         let id = client_ids.get(0).unwrap();
-        let player = self.get_client(*id).unwrap().player.as_ref().unwrap();
+        let player = self.get_client(id.0).unwrap().player.as_ref().unwrap();
         let opp_player = self
-            .get_client(room.other_id(*id))
+            .get_client(room.other_id(id.0))
             .unwrap()
             .player
             .as_ref()
