@@ -48,7 +48,7 @@ pub struct GameServer {
     handler: Arc<Mutex<NodeHandler<()>>>,
     config: CliConfig,
     packet_handlers: VecMap<PacketHandler>,
-    endpoints: HashMap<Endpoint, usize>,
+    endpoints: Arc<Mutex<HashMap<Endpoint, usize>>>,
     all_clients: HashMap<usize, Client>,
     num_clients: Arc<AtomicUsize>,
     next_client_id: usize,
@@ -61,6 +61,7 @@ pub struct GameServer {
 
 const MAX_ROOMS: usize = 1000;
 const PRUNE_INTERVAL_SECS: u64 = 180;
+const HEARTBEAT_INTERVAL_SECS: u64 = 8;
 const MAX_PRUNE_AGE_SECS: u64 = 300;
 
 impl GameServer {
@@ -87,6 +88,7 @@ impl GameServer {
     }
 
     async fn start(&mut self, listener: NodeListener<()>) {
+        self.run_heartbeat_cycle();
         self.run_prune_cycle();
         // Core loop
         let packet_handlers = self.packet_handlers.clone();
@@ -115,8 +117,11 @@ impl GameServer {
                             let body = bytes.to_vec();
                             let packet = Packet { header, body };
 
-                            if let Some(id) = self.endpoints.get(&endpoint) {
+                            let endpoints = self.endpoints.lock();
+                            let result = endpoints.get(&endpoint);
+                            if let Some(id) = result {
                                 let id = *id;
+                                drop(endpoints);
                                 self.handle_data(id, packet, &packet_handlers).await;
                             }
                         }
@@ -133,7 +138,7 @@ impl GameServer {
     }
 
     async fn handle_connection(&mut self, endpoint: Endpoint, id: usize) {
-        self.endpoints.insert(endpoint, id);
+        self.endpoints.lock().insert(endpoint, id);
         self.all_clients.insert(id, Client::new(id, endpoint));
 
         let packet = WelcomePacket {
@@ -322,9 +327,12 @@ impl GameServer {
     }
 
     pub fn get_client_e(&self, endpoint: Endpoint) -> Option<&Client> {
-        let id = self.endpoints.get(&endpoint);
+        let endpoints = self.endpoints.lock();
+        let id = endpoints.get(&endpoint);
         if let Some(id) = id {
-            return self.all_clients.get(id);
+            let id = *id;
+            drop(endpoints);
+            return self.all_clients.get(&id);
         }
 
         None
@@ -407,6 +415,26 @@ impl GameServer {
             }
         });
     }
+
+    fn run_heartbeat_cycle(&mut self) {
+        let handler = self.handler.clone();
+        let endpoints = self.endpoints.clone();
+
+        thread::spawn(move || {
+            let packet = KeepAlivePacket;
+            let bytes = &stratepig_core::serialize_packet(Box::new(packet)).unwrap();
+
+            loop {
+                thread::sleep(time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+                let handler = handler.lock();
+                let endpoints = endpoints.lock();
+                for endpoint in endpoints.keys() {
+                    handler.network().send(*endpoint, bytes);
+                }
+                info!("Heartbeat");
+            }
+        });
+    }
 }
 
 #[tokio::main]
@@ -428,7 +456,7 @@ async fn main() {
         handler,
         config,
         packet_handlers: VecMap::new(),
-        endpoints: HashMap::new(),
+        endpoints: Arc::new(Mutex::new(HashMap::new())),
         all_clients: HashMap::new(),
         num_clients: Arc::new(AtomicUsize::new(0)),
         next_client_id: 1,
