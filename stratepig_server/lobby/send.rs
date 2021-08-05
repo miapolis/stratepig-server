@@ -83,7 +83,8 @@ impl GameServer {
 
     pub async fn update_room_timer(&self, room: &GameRoom, seconds: i32) {
         let packet = RoomTimerUpdatePacket {
-            timestamp: seconds as i64,
+            timestamp: seconds as i128,
+            server_now: util::unix_now(),
         };
         self.message_room(room, packet).await;
     }

@@ -13,7 +13,6 @@
 //!     server::start();
 //! }
 //! ```
-mod buffer;
 mod error;
 mod packet;
 

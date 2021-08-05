@@ -161,7 +161,7 @@ impl GameServer {
 
         for id in clients {
             let player = self.get_player_mut(id.0).unwrap();
-            player.current_buffer = buffer as u64;
+            player.current_buffer = buffer as u128;
         }
 
         if !(self.config.one_player || self.config.ignore_turns) {
@@ -190,7 +190,7 @@ impl GameServer {
             room.get().write().unwrap().last_buffer_timestamp = None;
             drop(room);
 
-            let diff = util::unix_now() - timestamp;
+            let diff = ((util::unix_now() - timestamp) as f32 / 1000.0).ceil() as u128;
             let player = self.get_player_mut(other_id).unwrap();
             player.current_buffer -= diff;
         }

@@ -1,5 +1,5 @@
 use crate::player::PlayerRole;
-use crate::util::unix_now;
+use crate::util::unix_now_secs;
 use crate::win::WinType;
 use crate::{GameRoom, GameServer};
 
@@ -20,8 +20,8 @@ impl GameServer {
         room.get().write().unwrap().abort_all_tickers();
         room.store_seen();
 
-        let start = room.inner().game_start_timestamp.unwrap_or(unix_now());
-        let elapsed = unix_now() - start;
+        let start = room.inner().game_start_timestamp.unwrap_or(unix_now_secs());
+        let elapsed = unix_now_secs() - start;
 
         self.send_win(room, role, win_type, elapsed, immediate)
             .await;

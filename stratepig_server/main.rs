@@ -9,7 +9,6 @@ use std::collections::VecDeque;
 use std::future::Future;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time;
@@ -50,7 +49,6 @@ pub struct GameServer {
     packet_handlers: VecMap<PacketHandler>,
     endpoints: Arc<Mutex<HashMap<Endpoint, usize>>>,
     all_clients: HashMap<usize, Client>,
-    num_clients: Arc<AtomicUsize>,
     next_client_id: usize,
     free_client_ids: VecDeque<usize>,
     pub game_rooms: Arc<Mutex<VecMap<GameRoom>>>,
@@ -106,7 +104,6 @@ impl GameServer {
                             }
                         };
                         self.handle_connection(endpoint, id).await;
-                        self.num_clients.fetch_add(1, Ordering::SeqCst);
                     }
                     StoredNetEvent::Message(endpoint, data) => {
                         if let Ok(header) = stratepig_core::deserialize_packet_header(&data) {
@@ -128,7 +125,6 @@ impl GameServer {
                     }
                     StoredNetEvent::Disconnected(endpoint) => {
                         self.handle_disconnect(endpoint).await;
-                        self.num_clients.fetch_sub(1, Ordering::SeqCst);
                     }
                     _ => {}
                 },
@@ -149,16 +145,25 @@ impl GameServer {
     }
 
     async fn handle_disconnect(&mut self, endpoint: Endpoint) {
-        if let Some(client) = self.get_client_e(endpoint) {
-            let client_id = client.id;
-            let game_room_id = client.game_room_id;
-            if game_room_id != 0 {
-                let id = client.id;
-                self.handle_client_disconnect(game_room_id, id, endpoint)
-                    .await;
-            }
+        let mut endpoints = self.endpoints.lock();
+        let id = endpoints.get(&endpoint);
+        if let Some(id) = id {
+            let id = *id;
+            if let Some(client) = self.all_clients.get(&id) {
+                let client_id = client.id;
+                let game_room_id = client.game_room_id;
 
-            self.all_clients.remove(&client_id);
+                endpoints.remove(&endpoint);
+                drop(endpoints);
+
+                if game_room_id != 0 {
+                    let id = client.id;
+                    self.handle_client_disconnect(game_room_id, id, endpoint)
+                        .await;
+                }
+
+                self.all_clients.remove(&client_id);
+            }
         }
     }
 
@@ -326,18 +331,6 @@ impl GameServer {
         self.all_clients.get(&id)
     }
 
-    pub fn get_client_e(&self, endpoint: Endpoint) -> Option<&Client> {
-        let endpoints = self.endpoints.lock();
-        let id = endpoints.get(&endpoint);
-        if let Some(id) = id {
-            let id = *id;
-            drop(endpoints);
-            return self.all_clients.get(&id);
-        }
-
-        None
-    }
-
     pub fn get_player(&self, id: usize) -> Option<&Player> {
         self.get_client(id)?.player.as_ref()
     }
@@ -382,7 +375,7 @@ impl GameServer {
                 let mut to_prune = Vec::new();
                 for (id, room) in game_rooms.lock().iter_mut() {
                     if !room.inner().in_game || room.inner().game_ended {
-                        if now > room.inner().last_seen_at + MAX_PRUNE_AGE_SECS {
+                        if now > (room.inner().last_seen_at + MAX_PRUNE_AGE_SECS).into() {
                             to_prune.push(id);
                         }
                     }
@@ -431,7 +424,6 @@ impl GameServer {
                 for endpoint in endpoints.keys() {
                     handler.network().send(*endpoint, bytes);
                 }
-                info!("Heartbeat");
             }
         });
     }
@@ -458,7 +450,6 @@ async fn main() {
         packet_handlers: VecMap::new(),
         endpoints: Arc::new(Mutex::new(HashMap::new())),
         all_clients: HashMap::new(),
-        num_clients: Arc::new(AtomicUsize::new(0)),
         next_client_id: 1,
         free_client_ids: VecDeque::new(),
         game_rooms: Arc::new(Mutex::new(VecMap::new())),
@@ -467,7 +458,7 @@ async fn main() {
         game_room_codes: Arc::new(Mutex::new(Vec::new())),
     };
 
-    let num_clients = server.num_clients.clone();
+    let endpoints = server.endpoints.clone();
     let game_rooms = server.game_rooms.clone();
 
     thread::spawn(move || loop {
@@ -477,11 +468,11 @@ async fn main() {
         }
         match result.unwrap().as_str() {
             "ss stats" => {
-                // let len_clients = core_server.lock()
+                let len_clients = endpoints.lock().len();
                 let len_game_rooms = game_rooms.lock().len();
 
                 println!("--- SERVER STATS ---");
-                println!("Number of clients: {}", num_clients.load(Ordering::SeqCst));
+                println!("Number of clients: {}", len_clients);
                 println!("Number of rooms: {}", len_game_rooms);
             }
             _ => {}

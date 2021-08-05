@@ -2,7 +2,6 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::any::Any;
 use std::io::Cursor;
 
-use crate::buffer::NetworkBuffer;
 use crate::error::Error;
 
 pub const PACKET_HEADER_SIZE: usize = 3;

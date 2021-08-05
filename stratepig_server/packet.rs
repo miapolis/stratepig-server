@@ -93,7 +93,8 @@ pub struct PigConfigValueChangedPacket {
 
 #[server_packet(14)]
 pub struct RoomTimerUpdatePacket {
-    pub timestamp: i64,
+    pub timestamp: i128,
+    pub server_now: u128,
 }
 
 #[server_packet(15)]
@@ -137,7 +138,8 @@ pub struct TurnInitPacket {
 #[server_packet(21)]
 pub struct TurnSecondUpdatePacket {
     pub role: u32,
-    pub turn_timestamp: u64,
+    pub turn_timestamp: u128,
+    pub server_now: u128,
     pub is_buffer: bool,
 }
 

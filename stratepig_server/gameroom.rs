@@ -8,7 +8,7 @@ use tokio::time;
 use crate::client::Client;
 use crate::packet::{RoomTimerUpdatePacket, TurnInitPacket, TurnSecondUpdatePacket, WinPacket};
 use crate::player::{Player, PlayerRole};
-use crate::util::unix_now;
+use crate::util::{unix_now, unix_now_secs};
 use crate::util::unix_timestamp_to;
 use crate::win::WinType;
 use crate::Endpoint;
@@ -33,7 +33,7 @@ pub struct GameRoomInner {
     pub current_turn: PlayerRole,
     pub room_ticker: Option<tokio::task::JoinHandle<()>>,
     pub game_ticker: Option<tokio::task::JoinHandle<()>>,
-    pub last_buffer_timestamp: Option<u64>,
+    pub last_buffer_timestamp: Option<u128>,
     pub game_start_timestamp: Option<u64>,
 }
 
@@ -52,7 +52,7 @@ impl GameRoom {
             game_ended: false,
             settings: GameRoomSettings::new(GameMode::Original, 600, 15, 300),
             fake_enemy: None,
-            last_seen_at: unix_now(),
+            last_seen_at: unix_now_secs(),
 
             current_turn: PlayerRole::One,
             room_ticker: None,
@@ -100,7 +100,7 @@ impl GameRoom {
     }
 
     pub fn store_seen(&self) {
-        self.get().write().unwrap().last_seen_at = unix_now();
+        self.get().write().unwrap().last_seen_at = unix_now_secs();
     }
 
     pub async fn start(&self, game: &GameServer, in_secs: u64) {
@@ -109,7 +109,8 @@ impl GameRoom {
         let timestamp = unix_timestamp_to(duration);
 
         let packet = RoomTimerUpdatePacket {
-            timestamp: timestamp as i64,
+            timestamp: timestamp as i128,
+            server_now: unix_now(),
         };
         game.message_room(self, packet).await;
 
@@ -131,7 +132,7 @@ impl GameRoom {
     pub async fn start_phase_two(&self) {
         let mut write = self.get().write().unwrap();
         write.game_phase = 2;
-        write.game_start_timestamp = Some(unix_now());
+        write.game_start_timestamp = Some(unix_now_secs());
     }
 
     pub async fn start_player_turn(&self, game: &GameServer, delay: bool) {
@@ -165,6 +166,7 @@ impl GameRoom {
             let packet = TurnSecondUpdatePacket {
                 role: role as u32,
                 turn_timestamp,
+                server_now: unix_now(),
                 is_buffer: false,
             };
             {
@@ -179,6 +181,7 @@ impl GameRoom {
             let packet = TurnSecondUpdatePacket {
                 role: role as u32,
                 turn_timestamp: buffer_timestamp,
+                server_now: unix_now(),
                 is_buffer: true,
             };
             {
@@ -193,8 +196,8 @@ impl GameRoom {
 
             {
                 let read = inner.read().unwrap();
-                let start = read.game_start_timestamp.unwrap_or(unix_now());
-                let elapsed = unix_now() - start;
+                let start = read.game_start_timestamp.unwrap_or(unix_now_secs());
+                let elapsed = unix_now_secs() - start;
 
                 let packet = WinPacket {
                     role: read.current_turn.opp() as u32,
