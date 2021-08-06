@@ -82,3 +82,9 @@ impl default::Default for CliConfig {
         }
     }
 }
+
+pub fn wait_for_command() -> Result<String, Box<dyn std::error::Error>> {
+    let mut buffer = String::new();
+    std::io::stdin().read_line(&mut buffer)?;
+    Ok(buffer.trim().to_owned())
+}

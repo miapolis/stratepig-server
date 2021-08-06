@@ -10,7 +10,7 @@ pub struct Player {
     pub is_ready: bool,
     pub play_again: bool,
 
-    pub current_buffer: u64,
+    pub current_buffer: u128,
 
     pub board: Board,
     pub init_board: Board,

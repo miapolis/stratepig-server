@@ -30,4 +30,3 @@ erl_crash.dump
 
 # Private static files
 /priv
-/data

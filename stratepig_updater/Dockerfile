@@ -22,7 +22,6 @@ COPY mix.lock /app/mix.lock
 RUN mix do deps.get --only $MIX_ENV, deps.compile
 
 # copy config, priv and release and application directories
-COPY priv /app/priv
 COPY lib /app/lib
 
 # compile app and create release

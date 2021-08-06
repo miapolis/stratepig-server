@@ -13,18 +13,25 @@ pub fn gen_game_room_code() -> String {
     output.to_uppercase()
 }
 
-pub fn unix_now() -> u64 {
+pub fn unix_now() -> u128 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+}
+
+pub fn unix_now_secs() -> u64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs()
 }
 
-pub fn unix_timestamp_to(to: Duration) -> u64 {
+pub fn unix_timestamp_to(to: Duration) -> u128 {
     let then = SystemTime::now() + to;
     then.duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
-        .as_secs()
+        .as_millis()
 }
 
 #[macro_export]

@@ -10,6 +10,7 @@ use crate::packet::{
 };
 use crate::player::{PlayerRole, RoomPlayer};
 use crate::GameServer;
+use crate::util::unix_now;
 use crate::StratepigError;
 mod send;
 mod settings;
@@ -44,6 +45,9 @@ impl GameServer {
         }
 
         if data.is_hosting {
+            let client = self.all_clients.get(&id).unwrap();
+            let endpoint = client.endpoint;
+
             let room = self
                 .create_room_from_data(data.data_null, &mut packet)
                 .await;
@@ -61,11 +65,11 @@ impl GameServer {
 
             let room = room.unwrap();
             let room_id = room.id();
-            room.get().write().unwrap().client_ids.push(id);
+            room.get().write().unwrap().client_ids.push((id, endpoint));
 
             drop(room);
 
-            let client = self.all_clients.get_mut(id).unwrap();
+            let client = self.all_clients.get_mut(&id).unwrap();
             client.set_game_room(room_id);
             client.room_player = Some(RoomPlayer::new(
                 PlayerRole::One,
@@ -113,7 +117,8 @@ impl GameServer {
                     drop(read);
                     drop(found);
 
-                    let client = self.all_clients.get_mut(id).unwrap();
+                    let client = self.all_clients.get_mut(&id).unwrap();
+                    let endpoint = client.endpoint;
                     client.set_game_room(room_id);
                     client.room_player = Some(RoomPlayer::new(
                         player_role,
@@ -128,7 +133,7 @@ impl GameServer {
                         .write()
                         .unwrap()
                         .client_ids
-                        .push(id);
+                        .push((id, endpoint));
 
                     let reference = self.get_room(room_id).unwrap();
 
@@ -157,11 +162,12 @@ impl GameServer {
         if let None = ctx {
             return Err(StratepigError::MissingContext);
         }
-        let (_client, room) = ctx.unwrap();
+        let (client, room) = ctx.unwrap();
+        let endpoint = client.endpoint;
         let room_id = room.id();
         drop(room);
 
-        self.handle_client_disconnect(room_id, id).await;
+        self.handle_client_disconnect(room_id, id, endpoint).await;
         Ok(())
     }
 
@@ -190,7 +196,7 @@ impl GameServer {
         drop(room);
 
         self.all_clients
-            .get_mut(id)
+            .get_mut(&id)
             .unwrap()
             .room_player
             .as_mut()
@@ -216,7 +222,7 @@ impl GameServer {
         } else {
             reference.cancel_start();
 
-            let packet = RoomTimerUpdatePacket { timestamp: -1 };
+            let packet = RoomTimerUpdatePacket { timestamp: -1, server_now: unix_now() };
             self.message_room(&reference, packet).await;
         }
 
@@ -247,7 +253,7 @@ impl GameServer {
         }
 
         self.all_clients
-            .get_mut(id)
+            .get_mut(&id)
             .unwrap()
             .room_player
             .as_mut()

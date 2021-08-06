@@ -16,7 +16,7 @@ impl GameServer {
         let read = room.inner();
 
         for id in read.client_ids.iter() {
-            let client = self.all_clients.get(*id).unwrap();
+            let client = self.all_clients.get(&id.0).unwrap();
             let room_player = client.room_player.as_ref().unwrap();
 
             let packet = RoomPlayerAddPacket {
@@ -83,7 +83,8 @@ impl GameServer {
 
     pub async fn update_room_timer(&self, room: &GameRoom, seconds: i32) {
         let packet = RoomTimerUpdatePacket {
-            timestamp: seconds as i64,
+            timestamp: seconds as i128,
+            server_now: util::unix_now(),
         };
         self.message_room(room, packet).await;
     }

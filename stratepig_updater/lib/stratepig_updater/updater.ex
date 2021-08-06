@@ -3,11 +3,12 @@ defmodule StratepigUpdater.Updater do
   use Plug.Router
 
   alias StratepigUpdater.Utils.Files
+  alias StratepigUpdater.Utils.Version
 
   plug(:match)
   plug(:dispatch)
 
-  def init(_opts) do
+  def init(opts) do
     IO.puts("Starting Stratepig Updater...")
 
     {:ok, launcher_contents} = File.read(Files.update_file(:launcher))
@@ -16,6 +17,8 @@ defmodule StratepigUpdater.Updater do
     :ets.new(:file_storage, [:named_table])
     :ets.insert(:file_storage, {"launcher", launcher_contents})
     :ets.insert(:file_storage, {"game", game_contents})
+
+    Version.init(opts)
   end
 
   forward("/launcher", to: StratepigUpdater.Routers.Launcher)

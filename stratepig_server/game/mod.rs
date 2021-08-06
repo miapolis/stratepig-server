@@ -6,10 +6,10 @@ use crate::GameServer;
 use crate::StratepigError;
 
 mod game;
+mod operations;
 mod send;
 mod start;
 mod win;
-mod operations;
 
 impl GameServer {
     pub async fn handle_client_finish_scene_load(
@@ -33,7 +33,7 @@ impl GameServer {
 
         if data.scene_index <= 2 {
             self.all_clients
-                .get_mut(id)
+                .get_mut(&id)
                 .unwrap()
                 .player
                 .as_mut()

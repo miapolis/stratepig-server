@@ -145,7 +145,7 @@ impl Pig {
     pub fn immovable(&self) -> bool {
         match self {
             Pig::Bomb | Pig::Flag => true,
-            _ => false
+            _ => false,
         }
     }
 

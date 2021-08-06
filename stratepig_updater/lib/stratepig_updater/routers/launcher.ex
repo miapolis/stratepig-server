@@ -20,7 +20,7 @@ defmodule StratepigUpdater.Routers.Launcher do
   end
 
   get "/d" do
-    Download.stream_file(conn, Files.binary(:launcher), "Stratepig Launcher.exe")
+    Download.stream_file(conn, Files.binary(:launcher), "launcher.zip")
   end
 
   match _ do

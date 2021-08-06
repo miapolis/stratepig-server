@@ -8,6 +8,9 @@ use stratepig_core;
 ////// SERVER PACKETS //////////////////
 ////////////////////////////////////////
 
+#[server_packet(0)]
+pub struct KeepAlivePacket;
+
 #[server_packet(1)]
 pub struct WelcomePacket {
     pub version: String,
@@ -90,7 +93,8 @@ pub struct PigConfigValueChangedPacket {
 
 #[server_packet(14)]
 pub struct RoomTimerUpdatePacket {
-    pub timestamp: i64,
+    pub timestamp: i128,
+    pub server_now: u128,
 }
 
 #[server_packet(15)]
@@ -134,7 +138,8 @@ pub struct TurnInitPacket {
 #[server_packet(21)]
 pub struct TurnSecondUpdatePacket {
     pub role: u32,
-    pub turn_timestamp: u64,
+    pub turn_timestamp: u128,
+    pub server_now: u128,
     pub is_buffer: bool,
 }
 
@@ -256,6 +261,7 @@ pub struct PlayAgainPacket {
 #[derive(Debug)]
 /// Messages that the server can send to the client
 pub enum ServerMessage {
+    KeepAlive = 0,
     Welcome = 1,
     Kicked = 2,
     ClientDisconnect = 3,

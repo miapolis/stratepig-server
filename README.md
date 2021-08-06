@@ -23,15 +23,10 @@ However, I do now have a blazingly fast server as far as I am aware.
 | Crate                                | Description |
 :--------------------------------------| :------------
 | [stratepig_cli](stratepig_cli)       | Parses arguments at the start of the application and contains the `CliConfig` struct
-| [stratepig_core](stratepig_core)     | Manages packet de/serialization, network buffers, mio event loop, and other low level things
+| [stratepig_core](stratepig_core)     | Manages packet serialization and deserialization
 | [stratepig_game](stratepig_game)     | Contains all game-related objects, constants, and functions for paths             
 | [stratepig_macros](stratepig_macros) | Includes the `#[server_packet(id)` and `#[client_packet(id)]` procedular macros for stratepig_core
 | [stratepig_server](stratepig_server) | The main crate that ties everything together. Includes most server and game logic
-
-#### stratepig_core
-The core crate is mostly a mirror of [grubbnet](https://github.com/Dooskington/grubbnet),
-with some minor improvements and using a newer version of [mio](https://github.com/tokio-rs/mio).
-I also added macros to help with defining packets in [stratepig_macros](stratepig_macros).
 
 #### stratepig_updater
 Elixir update server for client downloads and possibly other things in the future.

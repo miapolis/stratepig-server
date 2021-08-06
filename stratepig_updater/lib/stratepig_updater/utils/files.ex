@@ -2,7 +2,7 @@ defmodule StratepigUpdater.Utils.Files do
   @type updatable :: :launcher | :game
 
   def priv_dir() do
-    :code.priv_dir(:stratepig_updater)
+    "/files/priv"
   end
 
   def static_asset(path) do
@@ -17,10 +17,18 @@ defmodule StratepigUpdater.Utils.Files do
     end
   end
 
+  @spec version_file(updatable) :: any()
+  def version_file(typ) do
+    case typ do
+      :launcher -> static_asset("versions/launcher.txt")
+      :game -> static_asset("versions/game.txt")
+    end
+  end
+
   @spec binary(updatable) :: any()
   def binary(typ) do
     case typ do
-      :launcher -> static_asset("bin/Launcher.exe")
+      :launcher -> static_asset("bin/Launcher.zip")
       :game -> static_asset("bin/Build.zip")
     end
   end

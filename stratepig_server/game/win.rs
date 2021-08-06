@@ -1,20 +1,27 @@
 use crate::player::PlayerRole;
-use crate::util::unix_now;
+use crate::util::unix_now_secs;
 use crate::win::WinType;
 use crate::{GameRoom, GameServer};
 
 impl GameServer {
     pub async fn broadcast_win(&self, room: &GameRoom, role: PlayerRole, win_type: WinType) {
-        self.broadcast_win_i(room, role, win_type, win_type.immediate()).await;
+        self.broadcast_win_i(room, role, win_type, win_type.immediate())
+            .await;
     }
 
-    pub async fn broadcast_win_i(&self, room: &GameRoom, role: PlayerRole, win_type: WinType, immediate: bool) {
+    pub async fn broadcast_win_i(
+        &self,
+        room: &GameRoom,
+        role: PlayerRole,
+        win_type: WinType,
+        immediate: bool,
+    ) {
         // Win terminates all tickers
         room.get().write().unwrap().abort_all_tickers();
         room.store_seen();
 
-        let start = room.inner().game_start_timestamp.unwrap_or(unix_now());
-        let elapsed = unix_now() - start;
+        let start = room.inner().game_start_timestamp.unwrap_or(unix_now_secs());
+        let elapsed = unix_now_secs() - start;
 
         self.send_win(room, role, win_type, elapsed, immediate)
             .await;
@@ -28,7 +35,7 @@ impl GameServer {
                 opp_player = read.fake_enemy.as_ref().unwrap();
             } else if client_ids.len() == 2 {
                 opp_player = self
-                    .get_client(room.other_id(*id))
+                    .get_client(room.other_id(id.0))
                     .unwrap()
                     .player
                     .as_ref()
@@ -47,7 +54,7 @@ impl GameServer {
             }
             drop(read);
 
-            self.send_enemy_piece_data(*id, setup).await;
+            self.send_enemy_piece_data(id.0, setup).await;
         }
     }
 }

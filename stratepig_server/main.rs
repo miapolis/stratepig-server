@@ -1,5 +1,10 @@
 use log::{info, trace};
+use message_io::network::{Endpoint, Transport};
+use message_io::node::{
+    self, NodeHandler, NodeListener, StoredNetEvent, StoredNodeEvent as NodeEvent,
+};
 use parking_lot::{Mutex, MutexGuard};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::ops::Deref;
@@ -9,10 +14,8 @@ use std::thread;
 use std::time;
 use vec_map::VecMap;
 
-use stratepig_cli::CliConfig;
-use stratepig_core::server::{Server, ServerEvent};
-use stratepig_core::Token;
-use stratepig_core::{Packet, PacketBody, PacketRecipient};
+use stratepig_cli::{self, CliConfig};
+use stratepig_core::{Packet, PacketBody};
 use stratepig_macros;
 
 mod client;
@@ -41,11 +44,14 @@ type PacketHandler = fn(
 ) -> Pin<Box<dyn Future<Output = Result<(), StratepigError>> + '_>>;
 
 pub struct GameServer {
-    server: Arc<Mutex<Server>>,
+    handler: Arc<Mutex<NodeHandler<()>>>,
     config: CliConfig,
     packet_handlers: VecMap<PacketHandler>,
-    all_clients: VecMap<Client>,
-    game_rooms: Arc<Mutex<VecMap<GameRoom>>>,
+    endpoints: Arc<Mutex<HashMap<Endpoint, usize>>>,
+    all_clients: HashMap<usize, Client>,
+    next_client_id: usize,
+    free_client_ids: VecDeque<usize>,
+    pub game_rooms: Arc<Mutex<VecMap<GameRoom>>>,
     free_game_room_ids: Arc<Mutex<VecDeque<usize>>>,
     next_game_room_id: Arc<Mutex<usize>>,
     game_room_codes: Arc<Mutex<Vec<String>>>,
@@ -53,24 +59,10 @@ pub struct GameServer {
 
 const MAX_ROOMS: usize = 1000;
 const PRUNE_INTERVAL_SECS: u64 = 180;
+const HEARTBEAT_INTERVAL_SECS: u64 = 8;
 const MAX_PRUNE_AGE_SECS: u64 = 300;
 
 impl GameServer {
-    fn new(config: CliConfig) -> Result<Self, stratepig_core::Error> {
-        let server = Server::new("0.0.0.0", 32500, 30)?;
-
-        Ok(Self {
-            config,
-            server: Arc::new(Mutex::new(server)),
-            packet_handlers: VecMap::new(),
-            all_clients: VecMap::new(),
-            game_rooms: Arc::new(Mutex::new(VecMap::new())),
-            next_game_room_id: Arc::new(Mutex::new(0)),
-            free_game_room_ids: Arc::new(Mutex::new(VecDeque::new())),
-            game_room_codes: Arc::new(Mutex::new(Vec::new())),
-        })
-    }
-
     fn register_packet_handlers(&mut self) {
         macro_rules! register {
             ($id:expr, $p:expr) => {{
@@ -93,32 +85,57 @@ impl GameServer {
         register!(PlayAgain, Self::handle_client_play_again);
     }
 
-    async fn start(&mut self) {
+    async fn start(&mut self, listener: NodeListener<()>) {
+        self.run_heartbeat_cycle();
         self.run_prune_cycle();
         // Core loop
-        loop {
-            let events;
-            {
-                events = self.server.lock().tick();
-            }
-            for event in events.iter() {
-                match event {
-                    ServerEvent::ClientConnected(tok, _addr) => self.handle_connection(tok.0).await,
-                    ServerEvent::ClientDisconnected(tok) => self.handle_disconnect(tok.0).await,
-                    _ => {}
-                }
-            }
+        let packet_handlers = self.packet_handlers.clone();
+        let (_task, mut receiver) = listener.enqueue();
 
-            let packet_groups = self.server.lock().drain_incoming_packets();
-            let packet_handlers = self.packet_handlers.clone();
-            for (token, packet) in packet_groups.into_iter() {
-                self.handle_data(token, packet, &packet_handlers).await;
+        loop {
+            match receiver.receive() {
+                NodeEvent::Network(event) => match event {
+                    StoredNetEvent::Accepted(endpoint, _listener) => {
+                        let id = match self.free_client_ids.pop_front() {
+                            Some(id) => id,
+                            None => {
+                                self.next_client_id += 1;
+                                self.next_client_id
+                            }
+                        };
+                        self.handle_connection(endpoint, id).await;
+                    }
+                    StoredNetEvent::Message(endpoint, data) => {
+                        if let Ok(header) = stratepig_core::deserialize_packet_header(&data) {
+                            let packet_size =
+                                stratepig_core::PACKET_HEADER_SIZE + (header.size as usize);
+                            let bytes: &[u8] =
+                                &data[stratepig_core::PACKET_HEADER_SIZE..packet_size];
+                            let body = bytes.to_vec();
+                            let packet = Packet { header, body };
+
+                            let endpoints = self.endpoints.lock();
+                            let result = endpoints.get(&endpoint);
+                            if let Some(id) = result {
+                                let id = *id;
+                                drop(endpoints);
+                                self.handle_data(id, packet, &packet_handlers).await;
+                            }
+                        }
+                    }
+                    StoredNetEvent::Disconnected(endpoint) => {
+                        self.handle_disconnect(endpoint).await;
+                    }
+                    _ => {}
+                },
+                _ => {}
             }
         }
     }
 
-    async fn handle_connection(&mut self, id: usize) {
-        self.all_clients.insert(id, Client::new(id));
+    async fn handle_connection(&mut self, endpoint: Endpoint, id: usize) {
+        self.endpoints.lock().insert(endpoint, id);
+        self.all_clients.insert(id, Client::new(id, endpoint));
 
         let packet = WelcomePacket {
             version: version::VERSION.to_owned(),
@@ -127,23 +144,35 @@ impl GameServer {
         self.message_one(id, packet).await;
     }
 
-    async fn handle_disconnect(&mut self, id: usize) {
-        if let Some(client) = self.all_clients.get(id) {
-            let game_room_id = client.game_room_id;
-            if game_room_id != 0 {
-                self.handle_client_disconnect(game_room_id, id).await;
-            }
+    async fn handle_disconnect(&mut self, endpoint: Endpoint) {
+        let mut endpoints = self.endpoints.lock();
+        let id = endpoints.get(&endpoint);
+        if let Some(id) = id {
+            let id = *id;
+            if let Some(client) = self.all_clients.get(&id) {
+                let client_id = client.id;
+                let game_room_id = client.game_room_id;
 
-            self.all_clients.remove(id);
+                endpoints.remove(&endpoint);
+                drop(endpoints);
+
+                if game_room_id != 0 {
+                    let id = client.id;
+                    self.handle_client_disconnect(game_room_id, id, endpoint)
+                        .await;
+                }
+
+                self.all_clients.remove(&client_id);
+            }
         }
     }
 
-    async fn handle_client_disconnect(&mut self, room_id: usize, id: usize) {
+    async fn handle_client_disconnect(&mut self, room_id: usize, id: usize, endpoint: Endpoint) {
         let result = self.get_room(room_id);
         if let Some(_) = result {
             let room = result.unwrap();
             let mut client_ids = room.inner().client_ids.clone();
-            if !client_ids.contains(&id) {
+            if !client_ids.contains(&(id, endpoint)) {
                 return;
             }
 
@@ -151,7 +180,7 @@ impl GameServer {
 
             write
                 .client_ids
-                .remove(client_ids.iter().position(|x| *x == id).unwrap());
+                .remove(client_ids.iter().position(|x| x.0 == id).unwrap());
             write.in_game = false;
             write.abort_all_tickers(); // Nothing is functional with only one player, tickers don't need to be running
             client_ids = write.client_ids.clone();
@@ -169,34 +198,29 @@ impl GameServer {
             if client_ids.len() == 1 {
                 // If there is still someone left, we have to worry about whether or not
                 // they need to be made the host of the room
-                self.handle_transfer_ownership(id, client_ids[0]).await;
+                self.handle_transfer_ownership(id, client_ids[0].0).await;
             }
         }
     }
 
     async fn handle_transfer_ownership(&mut self, leave: usize, stay: usize) {
-        if let Some(player) = &self.all_clients.get(leave).unwrap().player {
+        if let Some(player) = &self.all_clients.get(&leave).unwrap().player {
             // Host left the game, ownership needs to be transferred
             if player.role == PlayerRole::One {
-                let client = self.all_clients.get_mut(stay).unwrap();
+                let client = self.all_clients.get_mut(&stay).unwrap();
                 client.player.as_mut().unwrap().role = PlayerRole::One;
             }
         }
     }
 
-    async fn handle_data(
-        &mut self,
-        token: Token,
-        packet: Packet,
-        handlers: &VecMap<PacketHandler>,
-    ) {
+    async fn handle_data(&mut self, id: usize, packet: Packet, handlers: &VecMap<PacketHandler>) {
         if let Some(func) = handlers.get(packet.header.id as usize) {
             {
-                let res = func(self, token.0, packet.clone()).await;
+                let res = func(self, id, packet.clone()).await;
                 if self.config.log_packet_output {
                     info!(
                         "Client {}: {:?} ==> {:?}",
-                        token.0,
+                        id,
                         ClientMessage::from(packet.header.id),
                         res
                     );
@@ -209,27 +233,32 @@ impl GameServer {
         if self.config.log_packet_output {
             info!("OUTBOUND({}) => {:?}", id, ServerMessage::from(packet.id()));
         }
-        self.server
-            .lock()
-            .send(PacketRecipient::Single(Token(id)), packet);
+        if let Some(client) = self.get_client(id) {
+            let endpoint = client.endpoint;
+            self.handler.lock().network().send(
+                endpoint,
+                &stratepig_core::serialize_packet(Box::new(packet)).unwrap(),
+            );
+        }
     }
 
     pub async fn message_room(&self, room: &GameRoom, packet: impl PacketBody) {
-        let tokens: Vec<Token> = room.clients().into_iter().map(|x| Token(x)).collect();
+        let client_ids = room.clients();
         if self.config.log_packet_output {
             info!(
                 "OUTBOUND({:?}) => {:?}",
-                tokens
-                    .clone()
-                    .into_iter()
-                    .map(|x| x.0)
-                    .collect::<Vec<usize>>(),
+                client_ids,
                 ServerMessage::from(packet.id())
             );
         }
-        self.server
-            .lock()
-            .send(PacketRecipient::Include(tokens), packet);
+
+        let bytes = &stratepig_core::serialize_packet(Box::new(packet)).unwrap();
+        for (id, _endpoint) in client_ids.into_iter() {
+            if let Some(client) = self.get_client(id) {
+                let endpoint = client.endpoint;
+                self.handler.lock().network().send(endpoint, bytes);
+            }
+        }
     }
 
     pub fn new_room(&mut self) -> Result<impl Deref<Target = GameRoom> + '_, &str> {
@@ -299,7 +328,7 @@ impl GameServer {
     }
 
     pub fn get_client(&self, id: usize) -> Option<&Client> {
-        self.all_clients.get(id)
+        self.all_clients.get(&id)
     }
 
     pub fn get_player(&self, id: usize) -> Option<&Player> {
@@ -307,7 +336,7 @@ impl GameServer {
     }
 
     pub fn get_client_mut(&mut self, id: usize) -> Option<&mut Client> {
-        self.all_clients.get_mut(id)
+        self.all_clients.get_mut(&id)
     }
 
     pub fn get_player_mut(&mut self, id: usize) -> Option<&mut Player> {
@@ -315,7 +344,7 @@ impl GameServer {
     }
 
     pub fn get_context(&self, id: usize) -> Option<(&Client, impl Deref<Target = GameRoom> + '_)> {
-        let client = self.all_clients.get(id).unwrap();
+        let client = self.all_clients.get(&id).unwrap();
         let room_id = client.game_room_id;
         if room_id == 0 || client.room_player.is_none() {
             return None;
@@ -335,7 +364,7 @@ impl GameServer {
     fn run_prune_cycle(&mut self) {
         let game_rooms = self.game_rooms.clone();
         let free_game_room_ids = self.free_game_room_ids.clone();
-        let server = self.server.clone();
+        let handler = self.handler.clone();
 
         thread::spawn(move || {
             loop {
@@ -346,7 +375,7 @@ impl GameServer {
                 let mut to_prune = Vec::new();
                 for (id, room) in game_rooms.lock().iter_mut() {
                     if !room.inner().in_game || room.inner().game_ended {
-                        if now > room.inner().last_seen_at + MAX_PRUNE_AGE_SECS {
+                        if now > (room.inner().last_seen_at + MAX_PRUNE_AGE_SECS).into() {
                             to_prune.push(id);
                         }
                     }
@@ -362,14 +391,39 @@ impl GameServer {
                     let packet = KickedPacket {
                         msg: "Room closed due to inactivity.".to_owned(),
                     };
-                    let tokens: Vec<Token> = room.clients().into_iter().map(|x| Token(x)).collect();
-                    server.lock().send(PacketRecipient::Include(tokens), packet);
+                    let bytes = &stratepig_core::serialize_packet(Box::new(packet)).unwrap();
+
+                    let handler = handler.lock();
+                    let endpoints: Vec<Endpoint> =
+                        room.clients().into_iter().map(|x| x.1).collect();
+                    for endpoint in endpoints.into_iter() {
+                        handler.network().send(endpoint, bytes);
+                    }
 
                     drop(room);
                     pruned += 1;
                 }
 
                 info!("Pruned {} room(s) | ({})", pruned, game_rooms.len());
+            }
+        });
+    }
+
+    fn run_heartbeat_cycle(&mut self) {
+        let handler = self.handler.clone();
+        let endpoints = self.endpoints.clone();
+
+        thread::spawn(move || {
+            let packet = KeepAlivePacket;
+            let bytes = &stratepig_core::serialize_packet(Box::new(packet)).unwrap();
+
+            loop {
+                thread::sleep(time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
+                let handler = handler.lock();
+                let endpoints = endpoints.lock();
+                for endpoint in endpoints.keys() {
+                    handler.network().send(*endpoint, bytes);
+                }
             }
         });
     }
@@ -382,11 +436,55 @@ async fn main() {
 
     let config = CliConfig::new();
     config.log();
-    let mut server = GameServer::new(config).unwrap_or_else(|e| {
-        eprintln!("Error creating server: {}", e);
-        std::process::exit(2);
+
+    let (handler, listener) = node::split::<()>();
+    handler
+        .network()
+        .listen(Transport::Tcp, "0.0.0.0:32500")
+        .unwrap();
+    let handler = Arc::new(Mutex::new(handler));
+
+    let mut server = GameServer {
+        handler,
+        config,
+        packet_handlers: VecMap::new(),
+        endpoints: Arc::new(Mutex::new(HashMap::new())),
+        all_clients: HashMap::new(),
+        next_client_id: 1,
+        free_client_ids: VecDeque::new(),
+        game_rooms: Arc::new(Mutex::new(VecMap::new())),
+        next_game_room_id: Arc::new(Mutex::new(0)),
+        free_game_room_ids: Arc::new(Mutex::new(VecDeque::new())),
+        game_room_codes: Arc::new(Mutex::new(Vec::new())),
+    };
+
+    let endpoints = server.endpoints.clone();
+    let game_rooms = server.game_rooms.clone();
+
+    thread::spawn(move || loop {
+        let result = stratepig_cli::wait_for_command();
+        if result.is_err() {
+            continue;
+        }
+        match result.unwrap().as_str() {
+            "ss stats" => {
+                let len_clients = endpoints.lock().len();
+                let len_game_rooms = game_rooms.lock().len();
+
+                println!("--- SERVER STATS ---");
+                println!("Number of clients: {}", len_clients);
+                println!("Number of rooms: {}", len_game_rooms);
+            }
+            _ => {}
+        }
     });
 
+    ctrlc::set_handler(|| {
+        println!("Received exit signal");
+        std::process::exit(0);
+    })
+    .expect("Error setting Ctrl-C handler");
+
     server.register_packet_handlers();
-    server.start().await;
+    server.start(listener).await;
 }
