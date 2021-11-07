@@ -1,15 +1,16 @@
-version: "3.9"
+version: "3.3"
 
-services:
+services: 
+    stratepig_server:
+        build: .
+        ports:
+            - 32500:32500
+        stdin_open: true
     stratepig_updater:
         build: ./stratepig_updater
+        ports:
+            - 4001:4001
         volumes:
             - updater:/files
-        ports: 
-            - 4001:4001
-    stratepig_server: 
-        build: .
-        ports: 
-            - 32500:32500
 volumes:
     updater:

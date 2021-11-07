@@ -59,7 +59,6 @@ pub struct GameServer {
 
 const MAX_ROOMS: usize = 1000;
 const PRUNE_INTERVAL_SECS: u64 = 180;
-const HEARTBEAT_INTERVAL_SECS: u64 = 8;
 const MAX_PRUNE_AGE_SECS: u64 = 300;
 
 impl GameServer {
@@ -86,7 +85,6 @@ impl GameServer {
     }
 
     async fn start(&mut self, listener: NodeListener<()>) {
-        self.run_heartbeat_cycle();
         self.run_prune_cycle();
         // Core loop
         let packet_handlers = self.packet_handlers.clone();
@@ -405,25 +403,6 @@ impl GameServer {
                 }
 
                 info!("Pruned {} room(s) | ({})", pruned, game_rooms.len());
-            }
-        });
-    }
-
-    fn run_heartbeat_cycle(&mut self) {
-        let handler = self.handler.clone();
-        let endpoints = self.endpoints.clone();
-
-        thread::spawn(move || {
-            let packet = KeepAlivePacket;
-            let bytes = &stratepig_core::serialize_packet(Box::new(packet)).unwrap();
-
-            loop {
-                thread::sleep(time::Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
-                let handler = handler.lock();
-                let endpoints = endpoints.lock();
-                for endpoint in endpoints.keys() {
-                    handler.network().send(*endpoint, bytes);
-                }
             }
         });
     }

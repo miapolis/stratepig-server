@@ -8,6 +8,9 @@ defmodule StratepigUpdater.Updater do
   plug(:match)
   plug(:dispatch)
 
+  @supported_platforms ["windows", "linux"]
+  def supported_platforms(), do: @supported_platforms
+
   def init(opts) do
     IO.puts("Starting Stratepig Updater...")
 

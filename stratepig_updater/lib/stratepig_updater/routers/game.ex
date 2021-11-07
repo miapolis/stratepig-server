@@ -2,6 +2,7 @@ defmodule StratepigUpdater.Routers.Game do
   use Plug.Router
   import Plug.Conn
 
+  alias StratepigUpdater.Updater
   alias StratepigUpdater.Updater.Download
   alias StratepigUpdater.Utils.Version
   alias StratepigUpdater.Utils.Files
@@ -19,8 +20,16 @@ defmodule StratepigUpdater.Routers.Game do
     send_resp(conn, 200, contents)
   end
 
-  get "/d" do
-    Download.stream_file(conn, Files.binary(:game), "Build.zip")
+  get "/:platform/d" do
+    platform = conn.params["platform"]
+
+    case Enum.member?(Updater.supported_platforms(), platform) do
+      true ->
+        Download.stream_file(conn, Files.binary(:game, platform), "Build.zip")
+
+      _ ->
+        send_resp(conn, 404, "Platform not supported")
+    end
   end
 
   match _ do

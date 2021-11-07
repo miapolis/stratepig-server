@@ -9,8 +9,8 @@ use crate::packet::{
     UpdatePigItemValuePacket, UpdateReadyStatePacket, UpdateSettingsValue,
 };
 use crate::player::{PlayerRole, RoomPlayer};
-use crate::GameServer;
 use crate::util::unix_now;
+use crate::GameServer;
 use crate::StratepigError;
 mod send;
 mod settings;
@@ -222,7 +222,10 @@ impl GameServer {
         } else {
             reference.cancel_start();
 
-            let packet = RoomTimerUpdatePacket { timestamp: -1, server_now: unix_now() };
+            let packet = RoomTimerUpdatePacket {
+                timestamp: -1,
+                server_now: unix_now(),
+            };
             self.message_room(&reference, packet).await;
         }
 

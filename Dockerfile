@@ -1,26 +1,47 @@
-# 1: Build the exe
-FROM rust:1.53.0-slim as builder
-WORKDIR /usr
+####################################################################################################
+## Builder
+####################################################################################################
+FROM rust:latest AS builder
 
-# 1a: Prepare for static linking
-RUN apt-get update && \
-    apt-get dist-upgrade -y && \
-    apt-get install -y musl-tools && \
-    rustup target add x86_64-unknown-linux-musl
+RUN rustup target add x86_64-unknown-linux-musl
+RUN apt update && apt install -y musl-tools musl-dev
+RUN update-ca-certificates
 
-COPY Cargo.toml Cargo.lock ./
+# Create appuser
+ENV USER=stratepig-server
+ENV UID=10001
 
-# 1c: Build the exe using the actual source code
-COPY stratepig_cli ./stratepig_cli
-COPY stratepig_core ./stratepig_core
-COPY stratepig_game ./stratepig_game
-COPY stratepig_macros ./stratepig_macros
-COPY stratepig_server ./stratepig_server
-RUN cargo install --target x86_64-unknown-linux-musl --path .
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    "${USER}"
 
-# 2: Copy the exe and extra files ("static") to an empty Docker image
+
+WORKDIR /stratepig-server
+
+COPY ./ .
+
+RUN cargo build --target x86_64-unknown-linux-musl --release
+
+####################################################################################################
+## Final image
+####################################################################################################
 FROM scratch
-COPY --from=builder /usr/local/cargo/bin/stratepig_server .
-USER 1000
-EXPOSE 32500
-CMD ["./stratepig_server"]
+
+# Import from builder.
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+
+WORKDIR /stratepig-server
+
+# Copy our build
+COPY --from=builder /stratepig-server/target/x86_64-unknown-linux-musl/release/stratepig_server ./
+
+# Use an unprivileged user.
+USER stratepig-server:stratepig-server
+
+CMD ["/stratepig-server/stratepig_server"]

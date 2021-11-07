@@ -1,7 +1,17 @@
-version: "3.9"
+version: "3.3"
 
-services: 
-    stratepig_updater:
-        image: stratepig_server/stratepig_updater
-    stratepig_updater:
-        image: stratepig_server/stratepig_server
+services:
+    stratepig-updater:
+        image: miapolis/stratepig_updater
+        volumes:
+            - updater:/files
+        ports: 
+            - 4001:4001
+    stratepig-server: 
+        image: miapolis/stratepig-server
+        ports: 
+            - 32500:32500
+        # STDIN_OPEN IS REQUIRED OTHERWISE THE CPU USAGE JUMPS TO 100%
+        stdin_open: true
+volumes:
+    updater:
