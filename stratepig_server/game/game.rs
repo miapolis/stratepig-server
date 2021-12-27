@@ -10,27 +10,10 @@ use crate::StratepigError;
 impl GameServer {
     pub async fn move_received(&mut self, id: usize, packet: Packet) -> Result<(), StratepigError> {
         let data = MovePacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
-
-        if client.player.as_ref().is_none() {
-            return Err(StratepigError::with("missing player object on client"));
-        }
-        if room.inner().game_phase != 2 || room.inner().game_ended {
-            return Err(StratepigError::with(
-                "game not in correct state to allow move",
-            ));
-        }
         let current_turn = room.inner().current_turn;
+
         if !self.config.ignore_turns && client.player.as_ref().unwrap().role != current_turn {
             return Err(StratepigError::with("not at correct turn to allow move"));
         }
@@ -97,7 +80,7 @@ impl GameServer {
 
         macro_rules! index {
             ($loc:expr, $board:expr) => {
-                $board.iter().position(|x| x.location == $loc).unwrap();
+                $board.iter().position(|x| x.location == $loc).unwrap()
             };
         }
 

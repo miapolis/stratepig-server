@@ -1,4 +1,4 @@
-use log::{info, trace};
+use log::{info, trace, warn};
 use message_io::network::{Endpoint, Transport};
 use message_io::node::{
     self, NodeHandler, NodeListener, StoredNetEvent, StoredNodeEvent as NodeEvent,
@@ -23,6 +23,7 @@ mod constants;
 mod error;
 mod game;
 mod gameroom;
+mod guard;
 mod lobby;
 mod log_init;
 mod macros;
@@ -34,6 +35,7 @@ mod win;
 use client::Client;
 use error::StratepigError;
 use gameroom::{GameRoom, GameRoomError};
+use guard::{Guard, InGameGuard, InGameStrictGuard, InRoomGuard};
 use packet::{ClientMessage::*, *};
 use player::{Player, PlayerRole};
 
@@ -47,6 +49,7 @@ pub struct GameServer {
     handler: Arc<Mutex<NodeHandler<()>>>,
     config: CliConfig,
     packet_handlers: VecMap<PacketHandler>,
+    guards: VecMap<Option<Box<dyn Guard>>>,
     endpoints: Arc<Mutex<HashMap<Endpoint, usize>>>,
     all_clients: HashMap<usize, Client>,
     next_client_id: usize,
@@ -66,28 +69,61 @@ impl GameServer {
         macro_rules! register {
             ($id:expr, $p:expr) => {{
                 self.packet_handlers
-                    .insert($id as usize, |g, id, p| Box::pin($p(g, id, p)));
+                    .insert($id as usize, (|g, id, p| Box::pin($p(g, id, p))));
+                self.guards.insert($id as usize, None);
             }};
         }
 
-        // rustfmt friendly
+        macro_rules! register_guarded {
+            ($id:expr, $p:expr, $g:expr) => {{
+                self.packet_handlers
+                    .insert($id as usize, (|g, id, p| Box::pin($p(g, id, p))));
+                self.guards.insert($id as usize, Some(Box::new($g)));
+            }};
+        }
+
         register!(GameRequestSent, Self::handle_game_request);
-        register!(UpdateReadyState, Self::handle_ready_state_change);
-        register!(UpdatePigIcon, Self::handle_update_icon);
-        register!(UpdateSettingsValue, Self::handle_settings_value_update);
-        register!(UpdatePigItemValue, Self::handle_pig_item_update);
-        register!(FinishedSceneLoad, Self::handle_client_finish_scene_load);
-        register!(GamePlayerReadyData, Self::handle_game_player_ready);
-        register!(Move, Self::move_received);
-        register!(Surrender, Self::handle_surrender);
-        register!(LeaveGame, Self::handle_client_leave);
-        register!(PlayAgain, Self::handle_client_play_again);
+
+        register_guarded!(
+            UpdateReadyState,
+            Self::handle_ready_state_change,
+            InRoomGuard
+        );
+        register_guarded!(UpdatePigIcon, Self::handle_update_icon, InRoomGuard);
+        register_guarded!(
+            UpdateSettingsValue,
+            Self::handle_settings_value_update,
+            InRoomGuard
+        );
+        register_guarded!(
+            UpdatePigItemValue,
+            Self::handle_pig_item_update,
+            InRoomGuard
+        );
+        register_guarded!(
+            FinishedSceneLoad,
+            Self::handle_client_finish_scene_load,
+            InRoomGuard
+        );
+
+        register_guarded!(
+            GamePlayerReadyData,
+            Self::handle_game_player_ready,
+            InGameGuard
+        );
+
+        register_guarded!(Move, Self::move_received, InGameStrictGuard);
+        register_guarded!(Surrender, Self::handle_surrender, InGameStrictGuard);
+        register_guarded!(LeaveGame, Self::handle_client_leave, InGameStrictGuard);
+        register_guarded!(PlayAgain, Self::handle_client_play_again, InGameStrictGuard);
     }
 
     async fn start(&mut self, listener: NodeListener<()>) {
         self.run_prune_cycle();
         // Core loop
         let packet_handlers = self.packet_handlers.clone();
+        let guards = self.clone_guards();
+
         let (_task, mut receiver) = listener.enqueue();
 
         loop {
@@ -117,7 +153,8 @@ impl GameServer {
                             if let Some(id) = result {
                                 let id = *id;
                                 drop(endpoints);
-                                self.handle_data(id, packet, &packet_handlers).await;
+                                self.handle_data(id, packet, &packet_handlers, &guards)
+                                    .await;
                             }
                         }
                     }
@@ -211,9 +248,28 @@ impl GameServer {
         }
     }
 
-    async fn handle_data(&mut self, id: usize, packet: Packet, handlers: &VecMap<PacketHandler>) {
-        if let Some(func) = handlers.get(packet.header.id as usize) {
+    async fn handle_data(
+        &mut self,
+        id: usize,
+        packet: Packet,
+        handlers: &VecMap<PacketHandler>,
+        guards: &VecMap<Option<Box<dyn Guard>>>,
+    ) {
+        let packet_id = packet.header.id as usize;
+        if let Some(func) = handlers.get(packet_id) {
             {
+                // Evaluate guards
+                if let Some(guard) = guards.get(packet_id).unwrap() {
+                    if self.config.log_packet_output {
+                        info!("Checking guard '{}'", guard.name());
+                    }
+
+                    if let Err(err) = guard.guard(id, packet.clone(), &self) {
+                        warn!("Guard failed: {:?}", err);
+                        return;
+                    }
+                }
+
                 let res = func(self, id, packet.clone()).await;
                 if self.config.log_packet_output {
                     info!(
@@ -359,6 +415,21 @@ impl GameServer {
         ))
     }
 
+    fn clone_guards(&self) -> VecMap<Option<Box<dyn Guard>>> {
+        let mut map = VecMap::new();
+
+        for (id, guard) in self.guards.iter() {
+            if guard.is_none() {
+                map.insert(id, None);
+            } else {
+                let cloned = dyn_clone::clone(guard.as_ref().unwrap());
+                map.insert(id, Some(cloned));
+            }
+        }
+
+        map
+    }
+
     fn run_prune_cycle(&mut self) {
         let game_rooms = self.game_rooms.clone();
         let free_game_room_ids = self.free_game_room_ids.clone();
@@ -427,6 +498,7 @@ async fn main() {
         handler,
         config,
         packet_handlers: VecMap::new(),
+        guards: VecMap::new(),
         endpoints: Arc::new(Mutex::new(HashMap::new())),
         all_clients: HashMap::new(),
         next_client_id: 1,

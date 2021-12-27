@@ -18,17 +18,9 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = FinishedSceneLoadPacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (_client, room) = ctx.unwrap();
+        let (_client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
+
         drop(room);
 
         if data.scene_index <= 2 {

@@ -16,22 +16,9 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = GamePlayerReadyDataDefaultPacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (_client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
         drop(room);
-
-        if client.player.as_ref().is_none() {
-            return Err(StratepigError::with("missing player object on client"));
-        }
 
         if !data.ready {
             let player = self

@@ -177,16 +177,7 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdateReadyStatePacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (_client, room) = ctx.unwrap();
+        let (_client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
 
         if room.inner().in_game {
@@ -238,17 +229,9 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdatePigIconPacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (_client, room) = ctx.unwrap();
+        let (_client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
+
         drop(room);
 
         if data.icon > 12 {
@@ -275,16 +258,7 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdateSettingsValue::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (client, room) = self.get_context(id).unwrap();
 
         if client.player.as_ref().unwrap().role == PlayerRole::One {
             let key = &(u8::try_from(data.settings_id).unwrap_or(0));
@@ -372,19 +346,11 @@ impl GameServer {
         packet: Packet,
     ) -> Result<(), StratepigError> {
         let data = UpdatePigItemValuePacket::deserialize(&packet.body)?;
+        let (client, room) = self.get_context(id).unwrap();
 
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
         if let Pig::Empty = Pig::from(data.pig) {
             return Err(StratepigError::with("invalid pig"));
         }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
 
         if client.player.as_ref().unwrap().role == PlayerRole::One {
             let mut pig_config = room.inner().settings.pig_config.clone();

@@ -165,6 +165,11 @@ pub struct ClientPlayAgainPacket {
 ////// CLIENT PACKETS //////////////////
 ////////////////////////////////////////
 
+#[client_packet(0)]
+pub struct BaseGuardPacket {
+    pub my_id: String,
+}
+
 #[client_packet(1)]
 pub struct GameRequestDefaultPacket {
     pub my_id: String,
