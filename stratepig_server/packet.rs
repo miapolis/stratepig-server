@@ -247,20 +247,13 @@ pub struct MovePacket {
     pub to_location: u8,
 }
 
+// Useless packets
 #[client_packet(9)]
-pub struct SurrenderPacket {
-    pub my_id: String,
-}
-
+pub struct SurrenderPacket;
 #[client_packet(10)]
-pub struct LeaveGamePacket {
-    pub my_id: String,
-}
-
+pub struct LeaveGamePacket;
 #[client_packet(11)]
-pub struct PlayAgainPacket {
-    pub my_id: String,
-}
+pub struct PlayAgainPacket;
 
 #[allow(dead_code)]
 #[derive(Debug)]

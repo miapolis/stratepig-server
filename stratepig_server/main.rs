@@ -112,10 +112,10 @@ impl GameServer {
             InGameGuard
         );
 
+        register_guarded!(Surrender, Self::handle_surrender, InGameGuard);
+        register_guarded!(LeaveGame, Self::handle_client_leave, InGameGuard);
+        register_guarded!(PlayAgain, Self::handle_client_play_again, InGameGuard);
         register_guarded!(Move, Self::move_received, InGameStrictGuard);
-        register_guarded!(Surrender, Self::handle_surrender, InGameStrictGuard);
-        register_guarded!(LeaveGame, Self::handle_client_leave, InGameStrictGuard);
-        register_guarded!(PlayAgain, Self::handle_client_play_again, InGameStrictGuard);
     }
 
     async fn start(&mut self, listener: NodeListener<()>) {

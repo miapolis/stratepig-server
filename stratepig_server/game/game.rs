@@ -1,7 +1,7 @@
 use stratepig_core::{Packet, PacketBody};
 use stratepig_game::{InteractionResult, Pig};
 
-use crate::packet::{MovePacket, PlayAgainPacket, SurrenderPacket};
+use crate::packet::MovePacket;
 use crate::unwrap_ret;
 use crate::win::WinType;
 use crate::GameServer;
@@ -181,19 +181,9 @@ impl GameServer {
     pub async fn handle_client_play_again(
         &mut self,
         id: usize,
-        packet: Packet,
+        _packet: Packet,
     ) -> Result<(), StratepigError> {
-        let data = PlayAgainPacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (client, room) = self.get_context(id).unwrap();
         let room_id = room.id();
 
         if client.player.as_ref().is_none() {
@@ -237,19 +227,9 @@ impl GameServer {
     pub async fn handle_surrender(
         &mut self,
         id: usize,
-        packet: Packet,
+        _packet: Packet,
     ) -> Result<(), StratepigError> {
-        let data = SurrenderPacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (client, room) = self.get_context(id).unwrap();
 
         if client.player.as_ref().is_none() {
             return Err(StratepigError::with("missing player object on client"));

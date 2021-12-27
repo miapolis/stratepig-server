@@ -5,8 +5,8 @@ use crate::constants;
 use crate::gameroom;
 use crate::gameroom::{GameMode, GameRoomError};
 use crate::packet::{
-    GameRequestDefaultPacket, LeaveGamePacket, RoomTimerUpdatePacket, UpdatePigIconPacket,
-    UpdatePigItemValuePacket, UpdateReadyStatePacket, UpdateSettingsValue,
+    GameRequestDefaultPacket, RoomTimerUpdatePacket, UpdatePigIconPacket, UpdatePigItemValuePacket,
+    UpdateReadyStatePacket, UpdateSettingsValue,
 };
 use crate::player::{PlayerRole, RoomPlayer};
 use crate::util::unix_now;
@@ -150,19 +150,9 @@ impl GameServer {
     pub async fn handle_client_leave(
         &mut self,
         id: usize,
-        packet: Packet,
+        _packet: Packet,
     ) -> Result<(), StratepigError> {
-        let data = LeaveGamePacket::deserialize(&packet.body)?;
-
-        if id.to_string() != data.my_id {
-            return Err(StratepigError::AssumeWrongId);
-        }
-
-        let ctx = self.get_context(id);
-        if let None = ctx {
-            return Err(StratepigError::MissingContext);
-        }
-        let (client, room) = ctx.unwrap();
+        let (client, room) = self.get_context(id).unwrap();
         let endpoint = client.endpoint;
         let room_id = room.id();
         drop(room);
